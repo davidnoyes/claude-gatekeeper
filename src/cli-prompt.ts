@@ -58,3 +58,10 @@ export async function ask(question: string, defaultYes = false): Promise<boolean
   if (a === '') return defaultYes;
   return a === 'y' || a === 'yes';
 }
+
+/** Ask for text input. Returns empty string if no input. */
+export async function askText(question: string): Promise<string> {
+  process.stdout.write(`${question}: `);
+  const answer = await nextLine();
+  return answer.trim();
+}

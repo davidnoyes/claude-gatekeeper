@@ -17,6 +17,8 @@ export interface PublishedMessage {
   receivedAt: number;
   /** 'json' = POST /, 'simple' = POST /{topic} */
   publishMode: 'json' | 'simple';
+  /** Authorization header value if present. */
+  authHeader?: string;
 }
 
 export interface AutoRespondRule {
@@ -24,6 +26,8 @@ export interface AutoRespondRule {
   respondToTopic: string;
   responseBody: string;
   delayMs?: number;
+  /** Extract nonce from action button body and use it in response. */
+  extractNonce?: 'approve' | 'deny';
 }
 
 export class MockNtfyServer {
@@ -107,6 +111,7 @@ export class MockNtfyServer {
 
   /** Handle POST / — ntfy JSON publish endpoint. Topic comes from the JSON body. */
   private handleJsonPublish(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const authHeader = req.headers.authorization;
     let body = '';
     req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
     req.on('end', () => {
@@ -120,7 +125,7 @@ export class MockNtfyServer {
       }
 
       const topic = parsed.topic;
-      this._published.push({ topic, body, parsed, receivedAt: Date.now(), publishMode: 'json' });
+      this._published.push({ topic, body, parsed, receivedAt: Date.now(), publishMode: 'json', authHeader });
 
       // Broadcast the full JSON body to SSE listeners (parsed.message is what consumers read)
       this.broadcast(topic, String(parsed.message || ''));
@@ -134,10 +139,11 @@ export class MockNtfyServer {
 
   /** Handle POST /{topic} — ntfy simple publish endpoint. Body is raw message text. */
   private handleSimplePublish(topic: string, req: http.IncomingMessage, res: http.ServerResponse): void {
+    const authHeader = req.headers.authorization;
     let body = '';
     req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
     req.on('end', () => {
-      this._published.push({ topic, body, parsed: null, receivedAt: Date.now(), publishMode: 'simple' });
+      this._published.push({ topic, body, parsed: null, receivedAt: Date.now(), publishMode: 'simple', authHeader });
 
       // In simple publish, the raw body IS the message
       this.broadcast(topic, body);
@@ -153,7 +159,24 @@ export class MockNtfyServer {
     for (const rule of this.autoRules) {
       if (rule.listenTopic === topic) {
         const delay = rule.delayMs ?? 100;
-        const timer = setTimeout(() => this.internalPost(rule.respondToTopic, rule.responseBody), delay);
+        let responseBody = rule.responseBody;
+
+        // If extractNonce is set, extract the nonce from the published message's action buttons
+        if (rule.extractNonce) {
+          const msg = this._published.find(m => m.topic === topic && m.publishMode === 'json');
+          if (msg && msg.parsed) {
+            const parsed = msg.parsed as Record<string, unknown>;
+            const actions = parsed.actions as Array<Record<string, unknown>> | undefined;
+            if (actions) {
+              const action = actions.find(a => a.label === (rule.extractNonce === 'approve' ? 'Approve' : 'Deny'));
+              if (action && typeof action.body === 'string') {
+                responseBody = action.body;
+              }
+            }
+          }
+        }
+
+        const timer = setTimeout(() => this.internalPost(rule.respondToTopic, responseBody), delay);
         this.pendingTimers.push(timer);
       }
     }
@@ -194,7 +217,7 @@ export class MockNtfyServer {
 
   /** Simulate a phone button tap by posting internally to a topic. */
   private internalPost(topic: string, body: string): void {
-    this._published.push({ topic, body, parsed: null, receivedAt: Date.now(), publishMode: 'simple' });
+    this._published.push({ topic, body, parsed: null, receivedAt: Date.now(), publishMode: 'simple', authHeader: undefined });
     this.broadcast(topic, body);
   }
 }

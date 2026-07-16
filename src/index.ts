@@ -130,34 +130,35 @@ async function handleEscalation(
 }
 
 export async function main(): Promise<void> {
-  let input: HookInput;
-  let config: ApproverConfig;
+  // 1. Load config FIRST to determine mode (loadConfig catches internally, never throws)
+  const config = loadConfig();
+  const mode = config.mode;
 
-  // Parse errors → always escalate (don't deny on hook bugs)
+  // 2. Respect enabled flag
+  if (!config.enabled) {
+    process.exit(0);
+    return;
+  }
+
+  // 3. THEN parse stdin — on failure, mode determines whether we fail-closed (deny) or fail-safe (escalate)
+  let input: HookInput;
   try {
     const raw = readStdin();
     input = JSON.parse(raw) as HookInput;
   } catch {
-    process.exit(0);
-    return;
-  }
-
-  try {
-    config = loadConfig();
-  } catch {
-    process.exit(0);
-    return;
-  }
-
-  if (!config.enabled) {
-    process.exit(0);
+    if (mode === 'hands-free') {
+      // Hands-free: malformed input → deny (fail-closed, no human to ask)
+      writePreToolUseDeny('Malformed hook input — blocked for safety');
+    } else {
+      // Supervised: malformed input → escalate (fail-safe)
+      process.exit(0);
+    }
     return;
   }
 
   logDebug(`input: ${JSON.stringify({ hook_event_name: input.hook_event_name, tool_name: input.tool_name, cwd: input.cwd, transcript_path: input.transcript_path, tool_input: input.tool_input })}`, config);
 
   const hookType = input.hook_event_name;
-  const mode = config.mode;
 
   // Interactive tools (e.g. AskUserQuestion) are NOT access requests — they ask
   // the user to choose an option. The gatekeeper must never answer them for the

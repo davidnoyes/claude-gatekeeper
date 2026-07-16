@@ -1,4 +1,4 @@
-import { checkRules, extractMatchTarget, splitCompoundCommand, matchesAnyPattern } from '../../src/rules';
+import { checkRules, extractMatchTarget, splitCompoundCommand, matchesAnyPattern, hasCommandSubstitution } from '../../src/rules';
 import { ApproverConfig, HookInput } from '../../src/types';
 
 const baseConfig: ApproverConfig = {
@@ -104,6 +104,14 @@ describe('splitCompoundCommand', () => {
   it('handles empty segments', () => {
     expect(splitCompoundCommand('echo hello |')).toEqual(['echo hello']);
   });
+
+  it('splits single & (background)', () => {
+    expect(splitCompoundCommand('sleep 10 & echo done')).toEqual(['sleep 10', 'echo done']);
+  });
+
+  it('splits newlines', () => {
+    expect(splitCompoundCommand('echo a\necho b')).toEqual(['echo a', 'echo b']);
+  });
 });
 
 describe('matchesAnyPattern', () => {
@@ -117,6 +125,28 @@ describe('matchesAnyPattern', () => {
 
   it('returns false for empty patterns', () => {
     expect(matchesAnyPattern('anything', [])).toBe(false);
+  });
+});
+
+describe('hasCommandSubstitution', () => {
+  it('detects $() substitution', () => {
+    expect(hasCommandSubstitution('echo $(whoami)')).toBe(true);
+  });
+
+  it('detects backtick substitution', () => {
+    expect(hasCommandSubstitution('echo `whoami`')).toBe(true);
+  });
+
+  it('detects process substitution <()', () => {
+    expect(hasCommandSubstitution('diff <(ls a) <(ls b)')).toBe(true);
+  });
+
+  it('detects process substitution >()', () => {
+    expect(hasCommandSubstitution('tee >(grep foo)')).toBe(true);
+  });
+
+  it('returns false for clean commands', () => {
+    expect(hasCommandSubstitution('echo hello')).toBe(false);
   });
 });
 
@@ -155,5 +185,36 @@ describe('checkRules', () => {
 
   it('returns evaluate for unmatched non-Bash tools', () => {
     expect(checkRules(writeInput('/project/src/index.ts'), baseConfig)).toBe('evaluate');
+  });
+
+  it('does NOT approve if any segment fails to match approve pattern', () => {
+    const config = { ...baseConfig, alwaysApprovePatterns: ['git *'] };
+    // "git status" is approved, but "rm -rf ./x" is not → whole command returns 'evaluate'
+    expect(checkRules(bashInput('git status && rm -rf ./x'), config)).toBe('evaluate');
+  });
+
+  it('approves compound command when all segments match approve pattern', () => {
+    const config = { ...baseConfig, alwaysApprovePatterns: ['git *'] };
+    // Both "git status" and "git log" match "git *" → approve
+    expect(checkRules(bashInput('git status && git log'), config)).toBe('approve');
+  });
+
+  it('escalates compound with dangerous segment even if other segments match approve', () => {
+    const config = { ...baseConfig, alwaysApprovePatterns: ['echo *'] };
+    // "echo hello" matches approve pattern, but "sudo reboot" matches escalate pattern → escalate takes priority
+    expect(checkRules(bashInput('echo hello && sudo reboot'), config)).toBe('escalate');
+  });
+
+  it('does NOT approve commands with command substitution', () => {
+    const config = { ...baseConfig, alwaysApprovePatterns: ['echo *'] };
+    expect(checkRules(bashInput('echo a$(sudo rm -rf /)'), config)).toBe('evaluate');
+  });
+
+  it('escalates dangerous segments separated by newline', () => {
+    expect(checkRules(bashInput('echo safe\nsudo dangerous'), baseConfig)).toBe('escalate');
+  });
+
+  it('escalates dangerous segments separated by single &', () => {
+    expect(checkRules(bashInput('npm test & sudo reboot'), baseConfig)).toBe('escalate');
   });
 });

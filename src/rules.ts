@@ -46,9 +46,18 @@ function extractMatchTarget(input: HookInput): string {
  */
 function splitCompoundCommand(command: string): string[] {
   return command
-    .split(/\s*(?:\|{1,2}|&&|;)\s*/)
+    .split(/\s*(?:\|{1,2}|&{1,2}|;|\n)\s*/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Detect command substitution in a command string.
+ * Defense-in-depth against hiding commands in $() or backticks.
+ * Non-exhaustive: basic detection only.
+ */
+function hasCommandSubstitution(command: string): boolean {
+  return command.includes('$(') || command.includes('`') || command.includes('<(') || command.includes('>(');
 }
 
 /**
@@ -92,8 +101,18 @@ export function checkRules(input: HookInput, config: ApproverConfig, mode: Gatek
     if (matchesAnyPattern(target, config.alwaysEscalatePatterns)) {
       return dangerousResult;
     }
-    if (matchesAnyPattern(target, config.alwaysApprovePatterns)) {
-      return 'approve';
+    // Command substitution detection: suppress static-approve fast path (defense-in-depth)
+    if (hasCommandSubstitution(target)) {
+      return 'evaluate';
+    }
+    // For Bash approve: ALL segments must match at least one approve pattern
+    if (config.alwaysApprovePatterns.length > 0) {
+      const allSegmentsApproved = segments.every(segment =>
+        matchesAnyPattern(segment, config.alwaysApprovePatterns)
+      );
+      if (allSegmentsApproved) {
+        return 'approve';
+      }
     }
   } else {
     if (matchesAnyPattern(target, config.alwaysEscalatePatterns)) {
@@ -107,4 +126,4 @@ export function checkRules(input: HookInput, config: ApproverConfig, mode: Gatek
   return 'evaluate';
 }
 
-export { extractMatchTarget, splitCompoundCommand, matchesAnyPattern };
+export { extractMatchTarget, splitCompoundCommand, matchesAnyPattern, hasCommandSubstitution };

@@ -76,6 +76,8 @@ export interface NotifyConfig {
   server?: string;
   /** How long to wait for phone response in ms. Default: 60000 */
   timeoutMs?: number;
+  /** Bearer token for authenticated ntfy servers (optional). */
+  token?: string;
 }
 
 /** Loaded context for building the AI prompt. */

@@ -213,9 +213,9 @@ describe('main()', () => {
     expect(mockEvaluate).not.toHaveBeenCalled();
   });
 
-  // --- Error flows (all result in escalation) ---
+  // --- Error flows: stdin parse failures ---
 
-  it('escalates on invalid stdin JSON', async () => {
+  it('escalates on invalid stdin JSON in allow-or-ask mode', async () => {
     mockReadFileSync.mockReturnValue('not valid json{{{');
 
     await main();
@@ -224,7 +224,20 @@ describe('main()', () => {
     expect(stdoutSpy).not.toHaveBeenCalled();
   });
 
-  it('escalates on stdin read error', async () => {
+  it('denies on invalid stdin JSON in hands-free mode', async () => {
+    mockReadFileSync.mockReturnValue('not valid json{{{');
+    mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
+
+    await main();
+
+    expect(stdoutSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(stdoutSpy.mock.calls[0][0]);
+    expect(output.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(output.hookSpecificOutput.permissionDecisionReason).toContain('Malformed hook input');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('escalates on stdin read error in allow-or-ask mode', async () => {
     mockReadFileSync.mockImplementation(() => {
       throw new Error('stdin read failed');
     });
@@ -235,15 +248,19 @@ describe('main()', () => {
     expect(stdoutSpy).not.toHaveBeenCalled();
   });
 
-  it('escalates on config load error', async () => {
-    mockLoadConfig.mockImplementation(() => {
-      throw new Error('config load failed');
+  it('denies on stdin read error in hands-free mode', async () => {
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error('stdin read failed');
     });
+    mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
 
     await main();
 
-    expect(exitSpy).toHaveBeenCalledWith(0);
-    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(stdoutSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(stdoutSpy.mock.calls[0][0]);
+    expect(output.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(output.hookSpecificOutput.permissionDecisionReason).toContain('Malformed hook input');
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('escalates on evaluator error and logs it', async () => {

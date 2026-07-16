@@ -107,11 +107,15 @@ export function mergeConfig(userConfig: Partial<ApproverConfig>): ApproverConfig
     if (!merged.notify.topic || typeof merged.notify.topic !== 'string') {
       merged.notify = undefined;
     } else {
-      merged.notify = {
+      const validatedNotify: NotifyConfig = {
         topic: merged.notify.topic,
         server: merged.notify.server || 'https://ntfy.sh',
         timeoutMs: Math.max(5000, Math.min(120000, merged.notify.timeoutMs || 60000)),
       };
+      if (merged.notify.token && typeof merged.notify.token === 'string' && merged.notify.token.length > 0) {
+        validatedNotify.token = merged.notify.token;
+      }
+      merged.notify = validatedNotify;
     }
   }
 

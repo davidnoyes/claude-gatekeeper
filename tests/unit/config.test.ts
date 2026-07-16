@@ -126,6 +126,26 @@ describe('notify config', () => {
     expect(mergeConfig({ notify: { topic: 'a', timeoutMs: 999999 } }).notify!.timeoutMs).toBe(120000);
   });
 
+  it('carries through valid token', () => {
+    const config = mergeConfig({ notify: { topic: 'test', token: 'secret123' } });
+    expect(config.notify!.token).toBe('secret123');
+  });
+
+  it('omits token if empty string', () => {
+    const config = mergeConfig({ notify: { topic: 'test', token: '' } });
+    expect(config.notify!.token).toBeUndefined();
+  });
+
+  it('omits token if not a string', () => {
+    const config = mergeConfig({ notify: { topic: 'test', token: 123 as any } });
+    expect(config.notify!.token).toBeUndefined();
+  });
+
+  it('omits token if undefined', () => {
+    const config = mergeConfig({ notify: { topic: 'test' } });
+    expect(config.notify!.token).toBeUndefined();
+  });
+
   it('strips notify if topic is empty', () => {
     const config = mergeConfig({ notify: { topic: '' } });
     expect(config.notify).toBeUndefined();

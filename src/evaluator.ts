@@ -41,15 +41,11 @@ export function parseAiResponse(text: string): Pick<EvaluationResult, 'decision'
         };
       }
     } catch {
-      // fall through to keyword matching
+      // fall through to default escalate
     }
   }
 
-  const lower = text.toLowerCase();
-  if (lower.includes('approve') && !lower.includes('escalate')) {
-    return { decision: 'approve', confidence: 'low', reasoning: text.slice(0, 200) };
-  }
-
+  // No valid JSON found — default to escalate, never approve
   return { decision: 'escalate', confidence: 'low', reasoning: text.slice(0, 200) };
 }
 
@@ -59,14 +55,28 @@ export async function evaluateWithCli(
   config: ApproverConfig
 ): Promise<EvaluationResult> {
   const startTime = Date.now();
-  const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
 
   return new Promise((resolve) => {
-    const proc = spawn('claude', ['-p', '--model', config.model, '--output-format', 'json', '--no-session-persistence'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDECODE: '' },
-      timeout: config.timeoutMs,
-    });
+    const proc = spawn(
+      'claude',
+      [
+        '-p',
+        '--model',
+        config.model,
+        '--output-format',
+        'json',
+        '--no-session-persistence',
+        '--system-prompt',
+        systemPrompt,
+        '--allowedTools',
+        '',
+      ],
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, CLAUDECODE: '' },
+        timeout: config.timeoutMs,
+      }
+    );
 
     let stdout = '';
     let stderr = '';
@@ -127,7 +137,7 @@ export async function evaluateWithCli(
       });
     });
 
-    proc.stdin.write(fullPrompt);
+    proc.stdin.write(userMessage);
     proc.stdin.end();
   });
 }

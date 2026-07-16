@@ -19,6 +19,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { HookInput } from './types';
+import { splitCompoundCommand, hasCommandSubstitution } from './rules';
 
 interface ParsedRule {
   toolName: string;
@@ -129,28 +130,95 @@ export type PermissionCheckResult =
 export function checkPermissions(input: HookInput): PermissionCheckResult {
   const perms = loadPermissions();
 
-  // Deny list takes priority
-  const denyMatch = matchesAnyRule(input, perms.deny);
-  if (denyMatch) {
-    return {
-      action: 'deny',
-      reason: `This command is explicitly blocked by the user's deny list (matched: ${denyMatch}).`,
-    };
-  }
+  // For Bash, check deny/ask against ALL segments (any match → deny)
+  if (input.tool_name === 'Bash') {
+    const command = getInputString(input);
+    const segments = splitCompoundCommand(command);
 
-  // Ask list — in hands-free mode, no one to ask → deny
-  const askMatch = matchesAnyRule(input, perms.ask);
-  if (askMatch) {
-    return {
-      action: 'deny',
-      reason: `This command requires user review (matched: ${askMatch}) but the user is currently away. Try a safer alternative.`,
-    };
-  }
+    // Check deny list — any segment match OR full command match → deny
+    for (const segment of segments) {
+      const segmentInput: HookInput = {
+        ...input,
+        tool_input: { ...input.tool_input, command: segment },
+      };
+      const denyMatch = matchesAnyRule(segmentInput, perms.deny);
+      if (denyMatch) {
+        return {
+          action: 'deny',
+          reason: `This command is explicitly blocked by the user's deny list (matched: ${denyMatch}).`,
+        };
+      }
+    }
+    // Also check full command
+    const fullDenyMatch = matchesAnyRule(input, perms.deny);
+    if (fullDenyMatch) {
+      return {
+        action: 'deny',
+        reason: `This command is explicitly blocked by the user's deny list (matched: ${fullDenyMatch}).`,
+      };
+    }
 
-  // Allow list — skip evaluation
-  const allowMatch = matchesAnyRule(input, perms.allow);
-  if (allowMatch) {
-    return { action: 'allow' };
+    // Check ask list — any segment match OR full command match → deny (no user available)
+    for (const segment of segments) {
+      const segmentInput: HookInput = {
+        ...input,
+        tool_input: { ...input.tool_input, command: segment },
+      };
+      const askMatch = matchesAnyRule(segmentInput, perms.ask);
+      if (askMatch) {
+        return {
+          action: 'deny',
+          reason: `This command requires user review (matched: ${askMatch}) but the user is currently away. Try a safer alternative.`,
+        };
+      }
+    }
+    // Also check full command
+    const fullAskMatch = matchesAnyRule(input, perms.ask);
+    if (fullAskMatch) {
+      return {
+        action: 'deny',
+        reason: `This command requires user review (matched: ${fullAskMatch}) but the user is currently away. Try a safer alternative.`,
+      };
+    }
+
+    // Allow list — ALL segments must match
+    // Command substitution detection: suppress allow-list fast path (defense-in-depth)
+    if (hasCommandSubstitution(command)) {
+      return { action: 'none' };
+    }
+    // Check each segment individually against allow rules
+    const allSegmentsAllowed = segments.every(segment => {
+      const segmentInput: HookInput = {
+        ...input,
+        tool_input: { ...input.tool_input, command: segment },
+      };
+      return matchesAnyRule(segmentInput, perms.allow) !== null;
+    });
+    if (allSegmentsAllowed && segments.length > 0) {
+      return { action: 'allow' };
+    }
+  } else {
+    // Non-Bash tools: keep original behavior (whole-input matching)
+    const denyMatch = matchesAnyRule(input, perms.deny);
+    if (denyMatch) {
+      return {
+        action: 'deny',
+        reason: `This command is explicitly blocked by the user's deny list (matched: ${denyMatch}).`,
+      };
+    }
+
+    const askMatch = matchesAnyRule(input, perms.ask);
+    if (askMatch) {
+      return {
+        action: 'deny',
+        reason: `This command requires user review (matched: ${askMatch}) but the user is currently away. Try a safer alternative.`,
+      };
+    }
+
+    const allowMatch = matchesAnyRule(input, perms.allow);
+    if (allowMatch) {
+      return { action: 'allow' };
+    }
   }
 
   return { action: 'none' };

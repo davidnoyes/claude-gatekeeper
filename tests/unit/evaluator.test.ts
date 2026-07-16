@@ -101,19 +101,19 @@ describe('parseAiResponse', () => {
     expect(result.decision).toBe('escalate'); // "maybe" is not valid, no approve keyword
   });
 
-  it('handles malformed JSON that matches regex but fails parse', () => {
+  it('handles malformed JSON that matches regex but fails parse — defaults to escalate', () => {
     const result = parseAiResponse('{"decision": approve}'); // missing quotes
-    expect(result.decision).toBe('approve'); // falls back to keyword matching
+    expect(result.decision).toBe('escalate'); // no longer keyword-matches; strict JSON only
     expect(result.confidence).toBe('low');
   });
 
-  it('falls back to keyword matching — approve', () => {
+  it('garbled text containing "approve" defaults to escalate (no keyword fallback)', () => {
     const result = parseAiResponse('I would approve this command as it is safe.');
-    expect(result.decision).toBe('approve');
+    expect(result.decision).toBe('escalate');
     expect(result.confidence).toBe('low');
   });
 
-  it('falls back to keyword matching — escalate wins over approve', () => {
+  it('garbled text containing "approve" and "escalate" defaults to escalate', () => {
     const result = parseAiResponse('I would not approve, should escalate this.');
     expect(result.decision).toBe('escalate');
   });
@@ -200,26 +200,37 @@ describe('evaluateWithCli', () => {
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
   }, 15000);
 
-  it('writes the prompt to stdin and closes it', async () => {
+  it('writes only user message to stdin (system via arg)', async () => {
     const jsonOut = JSON.stringify({ result: '{"decision": "escalate", "confidence": "high", "reasoning": "test"}' });
     const proc = createMockProcess({ stdout: jsonOut });
     mockSpawn.mockReturnValue(proc);
 
     await evaluateWithCli('my system prompt', 'my user message', baseConfig);
 
-    expect(proc.stdin.write).toHaveBeenCalledWith('my system prompt\n\n---\n\nmy user message');
+    expect(proc.stdin.write).toHaveBeenCalledWith('my user message');
     expect(proc.stdin.end).toHaveBeenCalled();
   });
 
-  it('spawns claude with correct arguments', async () => {
+  it('spawns claude with correct arguments including --system-prompt and --allowedTools', async () => {
     const jsonOut = JSON.stringify({ result: '{"decision": "escalate", "confidence": "high"}' });
     mockSpawn.mockReturnValue(createMockProcess({ stdout: jsonOut }));
 
-    await evaluateWithCli('sys', 'usr', { ...baseConfig, model: 'sonnet' });
+    await evaluateWithCli('system prompt text', 'user text', { ...baseConfig, model: 'sonnet' });
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--model', 'sonnet', '--output-format', 'json', '--no-session-persistence'],
+      [
+        '-p',
+        '--model',
+        'sonnet',
+        '--output-format',
+        'json',
+        '--no-session-persistence',
+        '--system-prompt',
+        'system prompt text',
+        '--allowedTools',
+        '',
+      ],
       expect.objectContaining({
         stdio: ['pipe', 'pipe', 'pipe'],
         env: expect.objectContaining({ CLAUDECODE: '' }),

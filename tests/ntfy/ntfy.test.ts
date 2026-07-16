@@ -36,12 +36,13 @@ function makeConfig(server: MockNtfyServer, topic: string, timeoutMs = 5000): Ap
   };
 }
 
-function autoReply(srv: MockNtfyServer, topic: string, body: 'approve' | 'deny', delayMs = 100) {
+function autoReply(srv: MockNtfyServer, topic: string, decision: 'approve' | 'deny', delayMs = 100) {
   srv.autoRespond({
     listenTopic: topic,
     respondToTopic: `${topic}-response`,
-    responseBody: body,
+    responseBody: '', // Will be dynamically extracted from action buttons
     delayMs,
+    extractNonce: decision,
   });
 }
 
@@ -61,9 +62,10 @@ describe('ntfy integration: mock server', () => {
     await notifyAndWait(BASE_INPUT, 'confidence below threshold', config);
 
     const msgs = server.getPublished(topic);
-    expect(msgs).toHaveLength(1);
+    const mainMsg = msgs.find(m => m.parsed && (m.parsed as Record<string, unknown>).actions);
+    expect(mainMsg).toBeDefined();
 
-    const payload = msgs[0].parsed as Record<string, unknown>;
+    const payload = mainMsg!.parsed as Record<string, unknown>;
     expect(payload.topic).toBe(topic);
     expect(typeof payload.title).toBe('string');
     expect(typeof payload.message).toBe('string');
@@ -71,7 +73,7 @@ describe('ntfy integration: mock server', () => {
     expect(Array.isArray(payload.actions)).toBe(true);
   });
 
-  it('notifyAndWait: action button URLs point to response topic', async () => {
+  it('notifyAndWait: action button URLs point to response topic with nonce', async () => {
     const topic = 'gk-url-test';
     const config = makeConfig(server, topic, 500);
 
@@ -85,13 +87,15 @@ describe('ntfy integration: mock server', () => {
     expect(actions[0].label).toBe('Approve');
     expect(actions[0].url).toBe(`${server.baseUrl}/${topic}-response`);
     expect(actions[0].method).toBe('POST');
-    expect(actions[0].body).toBe('approve');
+    expect(typeof actions[0].body).toBe('string');
+    expect((actions[0].body as string).startsWith('approve:')).toBe(true);
 
     expect(actions[1].action).toBe('http');
     expect(actions[1].label).toBe('Deny');
     expect(actions[1].url).toBe(`${server.baseUrl}/${topic}-response`);
     expect(actions[1].method).toBe('POST');
-    expect(actions[1].body).toBe('deny');
+    expect(typeof actions[1].body).toBe('string');
+    expect((actions[1].body as string).startsWith('deny:')).toBe(true);
   });
 
   it('notifyAndWait: payload includes priority 4', async () => {
@@ -201,5 +205,57 @@ describe('ntfy integration: mock server', () => {
     expect(msg).toContain('/Users/dev/project');
     expect(msg).toContain('ntfy-tes');
     expect(msg).toContain('AI confidence below threshold');
+  });
+
+  // --- Token authentication ---
+
+  it('notifyAndWait: sends Authorization header when token is configured', async () => {
+    const topic = 'gk-token-test';
+    const config: ApproverConfig = {
+      ...makeConfig(server, topic, 500),
+      notify: { topic, server: server.baseUrl, timeoutMs: 500, token: 'secret123' },
+    };
+
+    await notifyAndWait(BASE_INPUT, 'test', config);
+
+    const msgs = server.getPublished(topic);
+    const mainMsg = msgs.find(m => m.parsed && (m.parsed as Record<string, unknown>).actions);
+    expect(mainMsg).toBeDefined();
+    expect(mainMsg!.authHeader).toBe('Bearer secret123');
+  });
+
+  it('notifyAndWait: no Authorization header when token is undefined', async () => {
+    const topic = 'gk-no-token-test';
+    const config = makeConfig(server, topic, 500);
+
+    await notifyAndWait(BASE_INPUT, 'test', config);
+
+    const msgs = server.getPublished(topic);
+    const mainMsg = msgs.find(m => m.parsed && (m.parsed as Record<string, unknown>).actions);
+    expect(mainMsg).toBeDefined();
+    expect(mainMsg!.authHeader).toBeUndefined();
+  });
+
+  it('sendTestNotification: sends Authorization header when token is provided', async () => {
+    const topic = 'gk-test-token';
+    const ok = await sendTestNotification(topic, server.baseUrl, 'secret456');
+    expect(ok).toBe(true);
+
+    const msgs = server.getPublished(topic);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].authHeader).toBe('Bearer secret456');
+  });
+
+  it('sendTestApproval: sends Authorization header when token is provided', async () => {
+    const topic = 'gk-approval-token';
+    autoReply(server, topic, 'approve');
+
+    const result = await sendTestApproval(topic, server.baseUrl, 5000, 'secret789');
+    expect(result).toBe('approve');
+
+    const msgs = server.getPublished(topic);
+    const mainMsg = msgs.find(m => m.topic === topic && m.publishMode === 'json');
+    expect(mainMsg).toBeDefined();
+    expect(mainMsg!.authHeader).toBe('Bearer secret789');
   });
 });

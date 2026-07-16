@@ -10,14 +10,22 @@
 
 import * as https from 'https';
 import * as http from 'http';
+import { randomBytes } from 'crypto';
 import { ApproverConfig, HookInput } from './types';
 import { summarizeInput, logDebug } from './logger';
 
-/** Parse an SSE message body for approve/deny. */
-export function parseSSEResponse(body: string): 'approve' | 'deny' | null {
-  const lower = body.trim().toLowerCase();
-  if (lower === 'approve') return 'approve';
-  if (lower === 'deny') return 'deny';
+/** Parse an SSE message body for approve/deny with nonce validation. */
+export function parseSSEResponse(body: string, expectedNonce: string): 'approve' | 'deny' | null {
+  const trimmed = body.trim();
+  const parts = trimmed.split(':');
+  if (parts.length !== 2) return null;
+
+  const decision = parts[0].toLowerCase();
+  const nonce = parts[1];
+
+  if (nonce !== expectedNonce) return null;
+  if (decision === 'approve') return 'approve';
+  if (decision === 'deny') return 'deny';
   return null;
 }
 
@@ -42,12 +50,13 @@ export function formatNotification(
   };
 }
 
-/** Build the ntfy.sh JSON payload with action buttons. */
+/** Build the ntfy.sh JSON payload with action buttons and nonce. */
 function buildPayload(
   topic: string,
   server: string,
   title: string,
-  message: string
+  message: string,
+  nonce: string
 ): string {
   return JSON.stringify({
     topic,
@@ -62,7 +71,7 @@ function buildPayload(
         url: `${server}/${topic}-response`,
         method: 'POST',
         headers: { 'X-Title': 'approved' },
-        body: 'approve',
+        body: `approve:${nonce}`,
         clear: true,
       },
       {
@@ -71,7 +80,7 @@ function buildPayload(
         url: `${server}/${topic}-response`,
         method: 'POST',
         headers: { 'X-Title': 'denied' },
-        body: 'deny',
+        body: `deny:${nonce}`,
         clear: true,
       },
     ],
@@ -93,7 +102,8 @@ async function sendConfirmation(
   topic: string,
   result: 'approve' | 'deny' | 'timeout',
   toolName: string,
-  summary: string
+  summary: string,
+  token?: string
 ): Promise<void> {
   const { label, tag } = confirmationDetails(result);
   const payload = JSON.stringify({
@@ -103,17 +113,24 @@ async function sendConfirmation(
     tags: [tag],
     priority: 2,
   });
-  await postJson(`${server}/`, payload).catch(() => {});
+  await postJson(`${server}/`, payload, token).catch(() => {});
 }
 
 /** POST a JSON payload to a URL. Returns true on 2xx. */
-function postJson(url: string, body: string): Promise<boolean> {
+function postJson(url: string, body: string, token?: string): Promise<boolean> {
   return new Promise((resolve) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Content-Length': String(Buffer.byteLength(body)),
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const req = mod.request(
       parsed,
-      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      { method: 'POST', headers },
       (res) => {
         res.resume(); // Drain response body so Node can close the socket
         resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
@@ -135,7 +152,9 @@ interface SSEListener {
 function listenForResponse(
   server: string,
   topic: string,
-  timeoutMs: number
+  timeoutMs: number,
+  nonce: string,
+  token?: string
 ): SSEListener {
   let finish: (result: 'approve' | 'deny' | 'timeout') => void;
 
@@ -155,7 +174,12 @@ function listenForResponse(
     const parsed = new URL(sseUrl);
     const mod = parsed.protocol === 'https:' ? https : http;
 
-    const req = mod.get(parsed, (res) => {
+    const options: http.RequestOptions = { method: 'GET' };
+    if (token) {
+      options.headers = { 'Authorization': `Bearer ${token}` };
+    }
+
+    const req = mod.get(parsed, options, (res) => {
       let buffer = '';
       res.on('data', (chunk: Buffer) => {
         buffer += chunk.toString();
@@ -166,7 +190,7 @@ function listenForResponse(
           try {
             const json = JSON.parse(line.slice(6));
             const msg = String(json.message || '');
-            const decision = parseSSEResponse(msg);
+            const decision = parseSSEResponse(msg, nonce);
             if (decision) {
               finish(decision);
               return;
@@ -198,17 +222,20 @@ export async function notifyAndWait(
 
   const server = notify.server || 'https://ntfy.sh';
   const timeoutMs = notify.timeoutMs || 60000;
+  const token = notify.token;
+
+  const nonce = randomBytes(16).toString('hex');
 
   const { title, message } = formatNotification(input, reason);
-  const payload = buildPayload(notify.topic, server, title, message);
+  const payload = buildPayload(notify.topic, server, title, message, nonce);
 
   logDebug(`notify: sending to ${server}/ (topic: ${notify.topic})`, config);
 
   // Start listening BEFORE sending so we don't miss a fast response
-  const listener = listenForResponse(server, notify.topic, timeoutMs);
+  const listener = listenForResponse(server, notify.topic, timeoutMs, nonce, token);
 
   // ntfy JSON publish endpoint is POST / (root); topic goes in the JSON body
-  const sent = await postJson(`${server}/`, payload);
+  const sent = await postJson(`${server}/`, payload, token);
   if (!sent) {
     listener.cancel(); // Clean up SSE connection and timer
     logDebug('notify: failed to send notification', config);
@@ -219,7 +246,7 @@ export async function notifyAndWait(
   const result = await listener.promise;
   logDebug(`notify: response=${result}`, config);
 
-  await sendConfirmation(server, notify.topic, result, input.tool_name, summarizeInput(input));
+  await sendConfirmation(server, notify.topic, result, input.tool_name, summarizeInput(input), token);
 
   return result;
 }
@@ -227,7 +254,7 @@ export async function notifyAndWait(
 /**
  * Send a test notification to verify setup.
  */
-export async function sendTestNotification(topic: string, server: string): Promise<boolean> {
+export async function sendTestNotification(topic: string, server: string, token?: string): Promise<boolean> {
   const payload = JSON.stringify({
     topic,
     title: 'Claude Gatekeeper — Test Notification',
@@ -235,7 +262,7 @@ export async function sendTestNotification(topic: string, server: string): Promi
     tags: ['white_check_mark'],
   });
   // ntfy JSON publish endpoint is POST / (root); topic goes in the JSON body
-  return postJson(`${server}/`, payload);
+  return postJson(`${server}/`, payload, token);
 }
 
 /**
@@ -244,24 +271,27 @@ export async function sendTestNotification(topic: string, server: string): Promi
 export async function sendTestApproval(
   topic: string,
   server: string,
-  timeoutMs: number
+  timeoutMs: number,
+  token?: string
 ): Promise<'approve' | 'deny' | 'timeout'> {
+  const nonce = randomBytes(16).toString('hex');
   const payload = buildPayload(
     topic,
     server,
     'Claude Gatekeeper — Setup Test',
-    'Please tap "Approve" to confirm your setup is working.'
+    'Please tap "Approve" to confirm your setup is working.',
+    nonce
   );
 
-  const listener = listenForResponse(server, topic, timeoutMs);
+  const listener = listenForResponse(server, topic, timeoutMs, nonce, token);
   // ntfy JSON publish endpoint is POST / (root); topic goes in the JSON body
-  const sent = await postJson(`${server}/`, payload);
+  const sent = await postJson(`${server}/`, payload, token);
   if (!sent) {
     listener.cancel();
     return 'timeout';
   }
 
   const result = await listener.promise;
-  await sendConfirmation(server, topic, result, 'Test', 'Setup verification');
+  await sendConfirmation(server, topic, result, 'Test', 'Setup verification', token);
   return result;
 }

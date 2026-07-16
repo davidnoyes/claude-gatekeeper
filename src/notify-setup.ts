@@ -4,7 +4,7 @@
 
 import { randomBytes } from 'crypto';
 import { existsSync } from 'fs';
-import { ask, closePrompt } from './cli-prompt';
+import { ask, askText, closePrompt } from './cli-prompt';
 import { getConfigPath } from './config';
 import { readJson, writeJson } from './fs-utils';
 import { sendTestNotification, sendTestApproval } from './notify';
@@ -41,8 +41,15 @@ export async function notifySetup(): Promise<void> {
     return;
   }
 
-  console.log('\nStep 3: Sending test notification...');
-  const sent = await sendTestNotification(topic, 'https://ntfy.sh');
+  console.log('\nStep 3: Optional access token for private ntfy servers');
+  console.log('  If using a private/authenticated ntfy server, enter your access token.');
+  console.log('  For public ntfy.sh, leave blank.\n');
+
+  const token = await askText('Access token (leave blank for none)');
+  const finalToken = token.length > 0 ? token : undefined;
+
+  console.log('\nStep 4: Sending test notification...');
+  const sent = await sendTestNotification(topic, 'https://ntfy.sh', finalToken);
   if (!sent) {
     console.error('  [error] Failed to send notification. Check your internet connection.\n');
     closePrompt();
@@ -60,12 +67,12 @@ export async function notifySetup(): Promise<void> {
     return;
   }
 
-  console.log('\nStep 4: Testing approve/deny buttons...');
+  console.log('\nStep 5: Testing approve/deny buttons...');
   console.log('  A test approval request was sent to your phone.');
   console.log('  Please tap "Approve" on the notification.\n');
 
   process.stdout.write('  Waiting for response...');
-  const response = await sendTestApproval(topic, 'https://ntfy.sh', 60000);
+  const response = await sendTestApproval(topic, 'https://ntfy.sh', 60000, finalToken);
 
   if (response === 'approve') {
     console.log(' [ok] Received: approve\n');
@@ -86,11 +93,15 @@ export async function notifySetup(): Promise<void> {
 
   const configPath = getConfigPath();
   const existing = existsSync(configPath) ? readJson(configPath) ?? {} : {};
-  (existing as Record<string, unknown>).notify = {
+  const notifyConfig: Record<string, unknown> = {
     topic,
     server: 'https://ntfy.sh',
     timeoutMs: 60000,
   };
+  if (finalToken) {
+    notifyConfig.token = finalToken;
+  }
+  (existing as Record<string, unknown>).notify = notifyConfig;
   writeJson(configPath, existing);
 
   console.log('  [ok] Config saved to ' + configPath);

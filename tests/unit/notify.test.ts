@@ -117,24 +117,40 @@ describe('formatNotification edge cases', () => {
 });
 
 describe('parseSSEResponse', () => {
-  it('parses approve response', () => {
-    expect(parseSSEResponse('approve')).toBe('approve');
+  const nonce = 'abc123def456';
+
+  it('parses approve response with correct nonce', () => {
+    expect(parseSSEResponse(`approve:${nonce}`, nonce)).toBe('approve');
   });
 
-  it('parses deny response', () => {
-    expect(parseSSEResponse('deny')).toBe('deny');
+  it('parses deny response with correct nonce', () => {
+    expect(parseSSEResponse(`deny:${nonce}`, nonce)).toBe('deny');
+  });
+
+  it('returns null for wrong nonce', () => {
+    expect(parseSSEResponse('approve:wrongnonce', nonce)).toBeNull();
+    expect(parseSSEResponse('deny:wrongnonce', nonce)).toBeNull();
+  });
+
+  it('returns null for missing nonce', () => {
+    expect(parseSSEResponse('approve', nonce)).toBeNull();
+    expect(parseSSEResponse('deny', nonce)).toBeNull();
   });
 
   it('returns null for garbage', () => {
-    expect(parseSSEResponse('random text here')).toBeNull();
+    expect(parseSSEResponse('random text here', nonce)).toBeNull();
   });
 
   it('returns null for empty string', () => {
-    expect(parseSSEResponse('')).toBeNull();
+    expect(parseSSEResponse('', nonce)).toBeNull();
   });
 
-  it('is case-insensitive', () => {
-    expect(parseSSEResponse('APPROVE')).toBe('approve');
-    expect(parseSSEResponse('Deny')).toBe('deny');
+  it('is case-insensitive for decision part', () => {
+    expect(parseSSEResponse(`APPROVE:${nonce}`, nonce)).toBe('approve');
+    expect(parseSSEResponse(`Deny:${nonce}`, nonce)).toBe('deny');
+  });
+
+  it('requires exact nonce match (case-sensitive)', () => {
+    expect(parseSSEResponse(`approve:ABC123DEF456`, nonce)).toBeNull();
   });
 });
