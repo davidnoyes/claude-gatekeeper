@@ -23,6 +23,7 @@ import { notifySetup } from './notify-setup';
 import { sendTestNotification } from './notify';
 import { loadConfig, getConfigPath } from './config';
 import { readJson, writeJson } from './fs-utils';
+import { startDaemon, stopDaemon, daemonStatus, restartDaemon } from './daemon';
 
 const program = new Command();
 
@@ -30,7 +31,10 @@ program
   .name('claude-gatekeeper')
   .description('Claude Code hook that uses AI to auto-approve safe permission requests')
   .version('1.0.0')
-  .addHelpCommand(false);
+  .addHelpCommand(false)
+  // Scope options to their command so `dashboard daemon start --port N` isn't
+  // swallowed by the parent `dashboard` command's own --port option.
+  .enablePositionalOptions();
 
 /** Print custom help text listing all commands. */
 function printHelp(): void {
@@ -42,11 +46,14 @@ function printHelp(): void {
   console.log('  mode [name]       View or switch operating mode');
   console.log('  enable            Enable the gatekeeper');
   console.log('  disable           Disable the gatekeeper (hooks stay registered)');
-  console.log('  dashboard         Open a local web dashboard of gatekeeper decisions');
-  console.log('  notify setup      Set up push notifications');
-  console.log('  notify test       Send a test notification');
-  console.log('  notify disable    Remove notification configuration');
-  console.log('  uninstall         Remove hooks and optionally delete config/logs');
+  console.log('  dashboard                Open a local web dashboard of gatekeeper decisions');
+  console.log('  dashboard daemon start   Start the dashboard as a background process');
+  console.log('  dashboard daemon stop    Stop the dashboard background process');
+  console.log('  dashboard daemon status  Show dashboard daemon status');
+  console.log('  notify setup               Set up push notifications');
+  console.log('  notify test                Send a test notification');
+  console.log('  notify disable             Remove notification configuration');
+  console.log('  uninstall                  Remove hooks and optionally delete config/logs');
   console.log('  ai                AI-assisted help for your setup');
   console.log('  help              Show this help text');
   console.log('');
@@ -187,9 +194,10 @@ notify
     }
   });
 
-program
+const dashboard = program
   .command('dashboard')
   .description('Open a local web dashboard of gatekeeper decisions')
+  .enablePositionalOptions()
   .option('--port <n>', 'Port to listen on', '4180')
   .option('--no-open', 'Do not auto-open the browser')
   .action(async (opts) => {
@@ -198,6 +206,63 @@ program
       await startDashboard({ port: parseInt(opts.port, 10) || 4180, open: opts.open !== false });
     } catch (err) {
       console.error(`Dashboard failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// Nested under `dashboard`: manage the dashboard as a background process.
+const daemon = dashboard
+  .command('daemon')
+  .description('Run the dashboard as a background process (start/stop; no login item)');
+
+daemon
+  .command('start')
+  .description('Start the dashboard background process')
+  .option('--port <n>', 'Port for the dashboard', '4180')
+  .action((opts) => {
+    try {
+      const port = parseInt(opts.port, 10) || 4180;
+      startDaemon(port);
+    } catch (err) {
+      console.error(`Daemon start failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+daemon
+  .command('stop')
+  .description('Stop the dashboard background process')
+  .action(() => {
+    try {
+      stopDaemon();
+    } catch (err) {
+      console.error(`Daemon stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+daemon
+  .command('status')
+  .description('Show dashboard daemon status')
+  .action(() => {
+    try {
+      daemonStatus();
+    } catch (err) {
+      console.error(`Daemon status failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+daemon
+  .command('restart')
+  .description('Restart the dashboard daemon')
+  .option('--port <n>', 'Port for the dashboard', '4180')
+  .action((opts) => {
+    try {
+      const port = parseInt(opts.port, 10) || 4180;
+      restartDaemon(port);
+    } catch (err) {
+      console.error(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });

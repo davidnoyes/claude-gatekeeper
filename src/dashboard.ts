@@ -328,6 +328,10 @@ export function createDashboardServer(opts: { port: number }): DashboardServer {
       stopWatcher();
       return new Promise((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
+        // server.close() waits for existing connections to end; the browser's
+        // SSE/keep-alive socket never closes on its own, so force them shut or
+        // the close callback (and shutdown) hangs forever.
+        server.closeAllConnections();
       });
     },
   };
@@ -366,6 +370,8 @@ export async function startDashboard(opts: { port: number; open: boolean }): Pro
   // SIGINT handler
   const handleSignal = async () => {
     console.log('\nShutting down dashboard...');
+    // Hard stop if close() ever stalls, so the process can never hang on exit.
+    setTimeout(() => process.exit(0), 2000).unref();
     await close();
     process.exit(0);
   };
