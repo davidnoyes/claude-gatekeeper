@@ -42,6 +42,7 @@ function printHelp(): void {
   console.log('  mode [name]       View or switch operating mode');
   console.log('  enable            Enable the gatekeeper');
   console.log('  disable           Disable the gatekeeper (hooks stay registered)');
+  console.log('  dashboard         Open a local web dashboard of gatekeeper decisions');
   console.log('  notify setup      Set up push notifications');
   console.log('  notify test       Send a test notification');
   console.log('  notify disable    Remove notification configuration');
@@ -182,6 +183,21 @@ notify
       console.log('\nNotifications disabled. Config updated.\n');
     } catch (err) {
       console.error(`Notify disable failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('dashboard')
+  .description('Open a local web dashboard of gatekeeper decisions')
+  .option('--port <n>', 'Port to listen on', '4180')
+  .option('--no-open', 'Do not auto-open the browser')
+  .action(async (opts) => {
+    try {
+      const { startDashboard } = await import('./dashboard');
+      await startDashboard({ port: parseInt(opts.port, 10) || 4180, open: opts.open !== false });
+    } catch (err) {
+      console.error(`Dashboard failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Gatekeeper — Decisions</title>
+  <style>
+    /* CSS reset & variables */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --bg-elevated: #1a1d28;
+      --bg-card: #23262f;
+      --text: #e4e6eb;
+      --text-muted: #9ca3af;
+      --border: #2d3139;
+      --approve: #10b981;
+      --approve-bg: #10b98115;
+      --escalate: #f59e0b;
+      --escalate-bg: #f59e0b15;
+      --deny: #ef4444;
+      --deny-bg: #ef444415;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --shadow: rgba(0, 0, 0, 0.3);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f9fafb;
+        --bg-elevated: #ffffff;
+        --bg-card: #f3f4f6;
+        --text: #111827;
+        --text-muted: #6b7280;
+        --border: #e5e7eb;
+        --shadow: rgba(0, 0, 0, 0.1);
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    /* Layout container */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* Sticky header */
+    .header {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: clamp(0.75rem, 2vw, 1rem);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: clamp(0.75rem, 3vw, 1.5rem);
+      flex-wrap: wrap;
+    }
+
+    .title {
+      font-size: clamp(1rem, 2.5vw, 1.25rem);
+      font-weight: 600;
+    }
+
+    .status-pills {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      font-size: clamp(0.7rem, 1.5vw, 0.8125rem);
+    }
+
+    .pill {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .connection-indicator {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--text-muted);
+      margin-right: 0.375rem;
+      display: inline-block;
+    }
+    .connection-indicator.live { background: var(--approve); }
+
+    /* Controls row */
+    .controls {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: clamp(0.5rem, 2vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
+      display: flex;
+      gap: clamp(0.75rem, 3vw, 1.5rem);
+      flex-wrap: wrap;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 9;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text);
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--bg-elevated);
+      border-color: var(--accent);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      overflow: hidden;
+    }
+    .mode-selector .btn {
+      border: none;
+      border-radius: 0;
+      border-right: 1px solid var(--border);
+    }
+    .mode-selector .btn:last-child { border-right: none; }
+
+    /* Filter bar */
+    .filters {
+      padding: clamp(0.5rem, 2vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-input {
+      flex: 1 1 auto;
+      min-width: 200px;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      font-size: 0.875rem;
+    }
+    .filter-input::placeholder { color: var(--text-muted); }
+
+    .filter-chips {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      padding: 0.25rem 0.75rem;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      border-radius: 9999px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: all 0.15s;
+    }
+    .chip:hover { border-color: var(--accent); }
+    .chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    /* Feed container */
+    .feed-container {
+      flex: 1;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .feed {
+      padding: clamp(0.5rem, 2vw, 1rem);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .new-items-pill {
+      position: sticky;
+      top: 0.5rem;
+      margin: 0 auto 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      color: white;
+      border-radius: 9999px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      box-shadow: 0 4px 12px var(--shadow);
+      z-index: 5;
+      width: fit-content;
+      display: none;
+    }
+    .new-items-pill.show { display: block; }
+
+    /* Decision row */
+    .decision-row {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: clamp(0.75rem, 2vw, 1rem);
+      transition: all 0.3s;
+      border-left-width: 4px;
+    }
+    .decision-row.approve { border-left-color: var(--approve); background: var(--approve-bg); }
+    .decision-row.escalate { border-left-color: var(--escalate); background: var(--escalate-bg); }
+    .decision-row.deny { border-left-color: var(--deny); background: var(--deny-bg); }
+
+    .decision-row.highlight {
+      animation: highlight 0.6s ease-out;
+    }
+    @keyframes highlight {
+      0% { transform: scale(1.02); box-shadow: 0 0 0 3px var(--accent); }
+      100% { transform: scale(1); box-shadow: none; }
+    }
+
+    .row-header {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.5rem;
+      font-size: clamp(0.75rem, 1.5vw, 0.875rem);
+    }
+
+    .decision-badge {
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.6875rem;
+      letter-spacing: 0.05em;
+    }
+    .decision-badge.approve { color: var(--approve); }
+    .decision-badge.escalate { color: var(--escalate); }
+    .decision-badge.deny { color: var(--deny); }
+
+    .tool-badge {
+      padding: 0.125rem 0.5rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+    }
+
+    .time {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-left: auto;
+    }
+
+    .input-line {
+      margin: 0.5rem 0;
+      padding: 0.5rem;
+      background: var(--bg-elevated);
+      border-radius: 0.25rem;
+      font-size: 0.875rem;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+
+    .row-footer {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+    }
+
+    .row-footer span {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .reasoning {
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      font-style: italic;
+      color: var(--text-muted);
+      word-break: break-word;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--deny);
+      color: white;
+      padding: 0.75rem 1rem;
+      border-radius: 0.375rem;
+      box-shadow: 0 4px 12px var(--shadow);
+      z-index: 100;
+      opacity: 0;
+      transform: translateY(1rem);
+      transition: all 0.3s;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    /* Responsive: phone layout */
+    @media (max-width: 640px) {
+      .row-header { font-size: 0.75rem; }
+      .time { width: 100%; margin-left: 0; margin-top: 0.25rem; }
+      .row-footer { flex-direction: column; gap: 0.25rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-top">
+        <h1 class="title">Claude Gatekeeper — Decisions</h1>
+        <div class="status-pills">
+          <span class="pill">
+            <span class="connection-indicator" id="conn-indicator"></span>
+            <span id="conn-status">connecting…</span>
+          </span>
+          <span class="pill" id="state-pill">—</span>
+          <span class="pill" id="mode-pill">—</span>
+          <span class="pill" id="backend-pill">—</span>
+          <span class="pill" id="threshold-pill">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="btn" id="toggle-btn" disabled>—</button>
+      <div class="mode-selector">
+        <button class="btn" data-mode="allow-or-ask">Allow-or-Ask</button>
+        <button class="btn" data-mode="hands-free">Hands-Free</button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+      <input type="text" class="filter-input" id="search-input" placeholder="Filter by tool, input, or reasoning…">
+      <div class="filter-chips">
+        <button class="chip active" data-decision="all">All</button>
+        <button class="chip" data-decision="approve">Approve</button>
+        <button class="chip" data-decision="escalate">Escalate</button>
+        <button class="chip" data-decision="deny">Deny</button>
+      </div>
+    </div>
+
+    <!-- Feed -->
+    <div class="feed-container" id="feed-container">
+      <div class="new-items-pill" id="new-items-pill">0 new ↑</div>
+      <div class="feed" id="feed">
+        <div class="empty-state">Waiting for decisions…</div>
+      </div>
+    </div>
+
+    <!-- Toast for errors -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      // Token injection (replaced by server)
+      const TOKEN = "__GATEKEEPER_TOKEN__";
+
+      // State
+      let status = null;
+      let decisions = [];
+      let seenSeqs = new Set();
+      let eventSource = null;
+      let currentFilter = { text: '', decision: 'all' };
+      let pendingNewCount = 0;
+      let isAtTop = true;
+
+      // DOM references
+      const els = {
+        connIndicator: document.getElementById('conn-indicator'),
+        connStatus: document.getElementById('conn-status'),
+        statePill: document.getElementById('state-pill'),
+        modePill: document.getElementById('mode-pill'),
+        backendPill: document.getElementById('backend-pill'),
+        thresholdPill: document.getElementById('threshold-pill'),
+        toggleBtn: document.getElementById('toggle-btn'),
+        searchInput: document.getElementById('search-input'),
+        feed: document.getElementById('feed'),
+        feedContainer: document.getElementById('feed-container'),
+        newItemsPill: document.getElementById('new-items-pill'),
+        toast: document.getElementById('toast')
+      };
+
+      // Fetch helpers
+      async function apiGet(path) {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return res.json();
+      }
+
+      async function apiPost(path, body = null) {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Gatekeeper-Token': TOKEN
+          },
+          body: body ? JSON.stringify(body) : null
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          throw new Error(err.error || res.statusText);
+        }
+        return res.json();
+      }
+
+      function showToast(message) {
+        els.toast.textContent = message;
+        els.toast.classList.add('show');
+        setTimeout(() => els.toast.classList.remove('show'), 4000);
+      }
+
+      // Status update
+      function updateStatus(newStatus) {
+        status = newStatus;
+        els.statePill.textContent = status.enabled ? 'Active' : 'Paused';
+        els.modePill.textContent = `Mode: ${status.mode}`;
+        els.backendPill.textContent = `${status.backend} · ${status.model || '—'}`;
+        els.thresholdPill.textContent = `Threshold: ${status.confidenceThreshold || '—'}`;
+
+        els.toggleBtn.textContent = status.enabled ? 'Disable' : 'Enable';
+        els.toggleBtn.disabled = false;
+
+        // Update mode selector
+        document.querySelectorAll('.mode-selector .btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.mode === status.mode);
+        });
+      }
+
+      // Relative time
+      function relativeTime(isoString) {
+        const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+        if (seconds < 60) return `${seconds}s ago`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
+      }
+
+      // Update all relative times
+      function updateAllTimes() {
+        document.querySelectorAll('.time').forEach(el => {
+          const iso = el.dataset.iso;
+          if (iso) el.textContent = relativeTime(iso);
+        });
+      }
+
+      // Render decision row
+      function renderRow(d) {
+        const div = document.createElement('div');
+        div.className = `decision-row ${d.decision}`;
+        div.dataset.seq = d.seq;
+        div.dataset.decision = d.decision;
+        div.dataset.tool = (d.tool || '').toLowerCase();
+        div.dataset.input = (d.input || '').toLowerCase();
+        div.dataset.reasoning = (d.reasoning || '').toLowerCase();
+
+        const latency = d.latencyMs >= 1000
+          ? `${(d.latencyMs / 1000).toFixed(1)}s`
+          : `${d.latencyMs}ms`;
+
+        div.innerHTML = `
+          <div class="row-header">
+            <span class="decision-badge ${d.decision}">${d.decision}</span>
+            ${d.tool ? `<span class="tool-badge">${escapeHtml(d.tool)}</span>` : ''}
+            <span class="time" data-iso="${d.ts}" title="${d.ts}">${relativeTime(d.ts)}</span>
+          </div>
+          ${d.input ? `<div class="input-line mono">${escapeHtml(d.input)}</div>` : ''}
+          <div class="row-footer">
+            <span>Confidence: ${d.confidence || '—'}</span>
+            <span>Model: ${d.model || '—'}</span>
+            <span>Latency: ${latency}</span>
+            ${d.session ? `<span>Session: ${escapeHtml(d.session.slice(0, 8))}</span>` : ''}
+          </div>
+          ${d.reasoning ? `<div class="reasoning">${escapeHtml(d.reasoning)}</div>` : ''}
+        `;
+
+        return div;
+      }
+
+      function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // Filter rows
+      function matchesFilter(row) {
+        const { text, decision } = currentFilter;
+        if (decision !== 'all' && row.dataset.decision !== decision) return false;
+        if (!text) return true;
+        const lowerText = text.toLowerCase();
+        return row.dataset.tool.includes(lowerText) ||
+               row.dataset.input.includes(lowerText) ||
+               row.dataset.reasoning.includes(lowerText);
+      }
+
+      function applyFilters() {
+        document.querySelectorAll('.decision-row').forEach(row => {
+          row.style.display = matchesFilter(row) ? '' : 'none';
+        });
+        checkEmptyState();
+      }
+
+      function checkEmptyState() {
+        const visible = Array.from(document.querySelectorAll('.decision-row')).some(
+          row => row.style.display !== 'none'
+        );
+        const empty = els.feed.querySelector('.empty-state');
+        if (!visible && !empty && decisions.length > 0) {
+          els.feed.innerHTML = '<div class="empty-state">No matching decisions</div>';
+        } else if (visible && empty) {
+          empty.remove();
+        }
+      }
+
+      // Add decision (prepend to top)
+      function addDecision(d, highlight = false) {
+        if (seenSeqs.has(d.seq)) return;
+        seenSeqs.add(d.seq);
+        decisions.unshift(d);
+
+        const row = renderRow(d);
+        if (highlight) row.classList.add('highlight');
+
+        const empty = els.feed.querySelector('.empty-state');
+        if (empty) empty.remove();
+
+        const frag = document.createDocumentFragment();
+        frag.appendChild(row);
+        els.feed.insertBefore(frag, els.feed.firstChild);
+
+        if (!matchesFilter(row)) row.style.display = 'none';
+
+        // Cap at 500 rows
+        const rows = els.feed.querySelectorAll('.decision-row');
+        if (rows.length > 500) {
+          const removed = rows[rows.length - 1];
+          removed.remove();
+          decisions.pop();
+          seenSeqs.delete(parseInt(removed.dataset.seq, 10));
+        }
+      }
+
+      // Initial load
+      async function init() {
+        try {
+          status = await apiGet('/api/status');
+          updateStatus(status);
+
+          const initialDecisions = await apiGet('/api/decisions?limit=200');
+          initialDecisions.forEach(d => addDecision(d, false));
+
+          startEventSource();
+        } catch (err) {
+          showToast('Failed to load: ' + err.message);
+        }
+      }
+
+      // EventSource
+      function startEventSource() {
+        if (eventSource) eventSource.close();
+
+        eventSource = new EventSource('/api/stream');
+
+        eventSource.addEventListener('decision', (e) => {
+          const d = JSON.parse(e.data);
+          addDecision(d, true);
+
+          if (!isAtTop) {
+            pendingNewCount++;
+            els.newItemsPill.textContent = `${pendingNewCount} new ↑`;
+            els.newItemsPill.classList.add('show');
+          }
+        });
+
+        eventSource.onopen = () => {
+          els.connIndicator.classList.add('live');
+          els.connStatus.textContent = 'live';
+        };
+
+        eventSource.onerror = () => {
+          els.connIndicator.classList.remove('live');
+          els.connStatus.textContent = 'reconnecting…';
+        };
+      }
+
+      // Scroll tracking
+      els.feedContainer.addEventListener('scroll', () => {
+        isAtTop = els.feedContainer.scrollTop < 50;
+        if (isAtTop && pendingNewCount > 0) {
+          pendingNewCount = 0;
+          els.newItemsPill.classList.remove('show');
+        }
+      });
+
+      els.newItemsPill.addEventListener('click', () => {
+        els.feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        pendingNewCount = 0;
+        els.newItemsPill.classList.remove('show');
+      });
+
+      // Controls
+      els.toggleBtn.addEventListener('click', async () => {
+        els.toggleBtn.disabled = true;
+        try {
+          const endpoint = status.enabled ? '/api/disable' : '/api/enable';
+          const res = await apiPost(endpoint);
+          updateStatus(res.status);
+        } catch (err) {
+          showToast('Control error: ' + err.message);
+          els.toggleBtn.disabled = false;
+        }
+      });
+
+      document.querySelectorAll('.mode-selector .btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const mode = btn.dataset.mode;
+          if (mode === status.mode) return;
+
+          document.querySelectorAll('.mode-selector .btn').forEach(b => b.disabled = true);
+          try {
+            const res = await apiPost('/api/mode', { mode });
+            updateStatus(res.status);
+          } catch (err) {
+            showToast('Mode change failed: ' + err.message);
+          } finally {
+            document.querySelectorAll('.mode-selector .btn').forEach(b => b.disabled = false);
+          }
+        });
+      });
+
+      // Filters
+      els.searchInput.addEventListener('input', (e) => {
+        currentFilter.text = e.target.value;
+        applyFilters();
+      });
+
+      document.querySelectorAll('.filter-chips .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          currentFilter.decision = chip.dataset.decision;
+          applyFilters();
+        });
+      });
+
+      // Update times every 5s
+      setInterval(updateAllTimes, 5000);
+
+      // Start
+      init();
+    })();
+  </script>
+</body>
+</html>

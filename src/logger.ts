@@ -9,7 +9,7 @@
  * A broken log file must never prevent the hook from functioning.
  */
 
-import { appendFileSync, mkdirSync } from 'fs';
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
 import { dirname } from 'path';
 import { ApproverConfig, EvaluationResult, HookInput } from './types';
 
@@ -39,6 +39,11 @@ export function summarizeInput(input: HookInput): string {
   return JSON.stringify(input.tool_input).slice(0, 120);
 }
 
+/** Derive the JSONL file path from the log file path. */
+export function decisionJsonlPath(logFile: string): string {
+  return logFile.replace(/\.log$/, '.jsonl') + (logFile.endsWith('.log') ? '' : '.jsonl');
+}
+
 export function logDecision(
   input: HookInput,
   result: EvaluationResult,
@@ -51,6 +56,22 @@ export function logDecision(
     const summary = summarizeInput(input);
     const line = `[${timestamp()}] decision=${result.decision} confidence=${result.confidence} model=${result.model} latency=${result.latencyMs}ms tool=${input.tool_name} input="${summary}" reasoning="${result.reasoning}"\n`;
     appendFileSync(config.logFile, line);
+
+    // Also write to JSONL
+    const jsonlPath = decisionJsonlPath(config.logFile);
+    const jsonlRecord = {
+      ts: timestamp(),
+      decision: result.decision,
+      confidence: result.confidence,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      tool: input.tool_name,
+      cwd: input.cwd,
+      session: input.session_name ?? input.session_id,
+      input: summary,
+      reasoning: result.reasoning,
+    };
+    appendFileSync(jsonlPath, JSON.stringify(jsonlRecord) + '\n');
   } catch {
     // Never break the hook if logging fails
   }
@@ -91,5 +112,52 @@ export function logDebug(message: string, config: ApproverConfig): void {
     appendFileSync(config.logFile, line);
   } catch {
     // Never break the hook if logging fails
+  }
+}
+
+/** Decision record shape (for dashboard consumption). */
+export interface DecisionRecord {
+  seq: number;
+  ts: string;
+  decision: string;
+  confidence: string;
+  model: string;
+  latencyMs: number;
+  tool: string;
+  cwd: string;
+  session: string;
+  input: string;
+  reasoning: string;
+}
+
+/**
+ * Read decisions from JSONL file, assigning each line an absolute sequence number.
+ * Returns the last `limit` records in oldest→newest order.
+ * Skips malformed/unparseable lines silently.
+ */
+export function readDecisions(jsonlPath: string, limit: number): DecisionRecord[] {
+  if (!existsSync(jsonlPath)) return [];
+
+  try {
+    const content = readFileSync(jsonlPath, 'utf-8');
+    const lines = content.split('\n');
+    const records: DecisionRecord[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        records.push({ seq: i, ...parsed });
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    // Return last `limit` records
+    const start = Math.max(0, records.length - limit);
+    return records.slice(start);
+  } catch {
+    return [];
   }
 }

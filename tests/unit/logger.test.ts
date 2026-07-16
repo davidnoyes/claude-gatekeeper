@@ -1,11 +1,13 @@
-import { logDecision, logWarning, logError, logDebug } from '../../src/logger';
-import { appendFileSync, mkdirSync } from 'fs';
+import { logDecision, logWarning, logError, logDebug, decisionJsonlPath, readDecisions } from '../../src/logger';
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
 import { ApproverConfig, EvaluationResult, HookInput } from '../../src/types';
 
 jest.mock('fs');
 
 const mockAppendFileSync = appendFileSync as jest.MockedFunction<typeof appendFileSync>;
 const mockMkdirSync = mkdirSync as jest.MockedFunction<typeof mkdirSync>;
+const mockReadFileSync = readFileSync as jest.MockedFunction<typeof readFileSync>;
+const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
 
 const baseConfig: ApproverConfig = {
   enabled: true,
@@ -43,10 +45,12 @@ beforeEach(() => {
 });
 
 describe('logDecision', () => {
-  it('writes a formatted log line', () => {
+  it('writes a formatted log line and JSONL record', () => {
     logDecision(baseInput, baseResult, baseConfig);
 
-    expect(mockAppendFileSync).toHaveBeenCalledTimes(1);
+    expect(mockAppendFileSync).toHaveBeenCalledTimes(2);
+
+    // First call: text log
     const logLine = mockAppendFileSync.mock.calls[0][1] as string;
     expect(logLine).toContain('decision=approve');
     expect(logLine).toContain('confidence=high');
@@ -54,6 +58,14 @@ describe('logDecision', () => {
     expect(logLine).toContain('tool=Bash');
     expect(logLine).toContain('npm test');
     expect(logLine).toContain('Safe dev command');
+
+    // Second call: JSONL
+    const jsonlLine = mockAppendFileSync.mock.calls[1][1] as string;
+    const parsed = JSON.parse(jsonlLine.trim());
+    expect(parsed.decision).toBe('approve');
+    expect(parsed.confidence).toBe('high');
+    expect(parsed.tool).toBe('Bash');
+    expect(parsed.input).toBe('npm test');
   });
 
   it('does not log when logLevel is warn', () => {
@@ -139,5 +151,50 @@ describe('logDebug', () => {
   it('does not write when logLevel is info', () => {
     logDebug('detailed info', baseConfig);
     expect(mockAppendFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('decisionJsonlPath', () => {
+  it('derives JSONL path from .log file', () => {
+    expect(decisionJsonlPath('/tmp/test-decisions.log')).toBe('/tmp/test-decisions.jsonl');
+  });
+
+  it('appends .jsonl if not ending in .log', () => {
+    expect(decisionJsonlPath('/tmp/decisions')).toBe('/tmp/decisions.jsonl');
+  });
+});
+
+describe('readDecisions', () => {
+  it('returns empty array for missing file', () => {
+    mockExistsSync.mockReturnValue(false);
+    expect(readDecisions('/nonexistent.jsonl', 10)).toEqual([]);
+  });
+
+  it('parses JSONL records with seq', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('{"decision":"approve"}\n{"decision":"deny"}\n');
+    const records = readDecisions('/tmp/test.jsonl', 10);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ seq: 0, decision: 'approve' });
+    expect(records[1]).toMatchObject({ seq: 1, decision: 'deny' });
+  });
+
+  it('skips malformed lines', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('{"ok":1}\nBAD\n{"ok":2}\n');
+    const records = readDecisions('/tmp/test.jsonl', 10);
+    expect(records).toHaveLength(2);
+    expect(records[0].seq).toBe(0);
+    expect(records[1].seq).toBe(2);
+  });
+
+  it('respects limit', () => {
+    mockExistsSync.mockReturnValue(true);
+    const lines = Array.from({ length: 10 }, (_, i) => `{"n":${i}}`).join('\n') + '\n';
+    mockReadFileSync.mockReturnValue(lines);
+    const records = readDecisions('/tmp/test.jsonl', 3);
+    expect(records).toHaveLength(3);
+    expect(records[0]).toMatchObject({ seq: 7, n: 7 });
+    expect(records[2]).toMatchObject({ seq: 9, n: 9 });
   });
 });

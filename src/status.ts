@@ -30,6 +30,36 @@ export function getHookStatus(): { permissionRequest: boolean; preToolUse: boole
   }
 }
 
+export interface StatusData {
+  hooks: {
+    permissionRequest: boolean;
+    preToolUse: boolean;
+  };
+  enabled: boolean;
+  mode: string;
+  backend: string;
+  model: string;
+  confidenceThreshold: string;
+  notify: boolean;
+  logFile: string;
+}
+
+/** Build status data as a structured object (for API consumption). */
+export function getStatusData(): StatusData {
+  const config = loadConfig();
+  const hooks = getHookStatus();
+  return {
+    hooks,
+    enabled: config.enabled,
+    mode: config.mode,
+    backend: config.backend,
+    model: config.model,
+    confidenceThreshold: config.confidenceThreshold,
+    notify: !!config.notify?.topic,
+    logFile: config.logFile,
+  };
+}
+
 /** Build status text as a string. Used by both the status command and ai-help context. */
 export function getStatusText(): string {
   const lines: string[] = [];
