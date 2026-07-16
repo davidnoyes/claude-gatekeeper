@@ -66,6 +66,12 @@ export interface ApproverConfig {
   alwaysApprovePatterns: string[];
   notify?: NotifyConfig;
   aiHelpAcknowledged?: boolean;
+  /**
+   * Shell command run (best-effort, detached) when the gatekeeper escalates
+   * a request to the user in allow-or-ask mode. Receives details via env vars:
+   * GATEKEEPER_TOOL, GATEKEEPER_INPUT, GATEKEEPER_REASON, GATEKEEPER_CWD.
+   */
+  escalationNotifyCommand?: string;
 }
 
 /** Configuration for ntfy.sh push notifications (optional). */

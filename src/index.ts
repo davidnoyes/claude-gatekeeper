@@ -23,6 +23,7 @@ import { checkRules } from './rules';
 import { logDecision, logDebug, logError } from './logger';
 import { checkPermissions } from './permissions';
 import { resolveProjectDir } from './project-dir';
+import { notifyEscalation } from './desktop-notify';
 
 const DENY_PREFIX = 'This is an automated deny by Claude Gatekeeper. The user is currently away and has delegated the AI gatekeeper to allow/deny commands.';
 
@@ -126,6 +127,7 @@ async function handleEscalation(
   }
 
   // No notification, denied, or timeout → escalate normally
+  notifyEscalation(input, reason, config);
   process.exit(0);
 }
 
@@ -185,6 +187,7 @@ export async function main(): Promise<void> {
         model: 'static',
         latencyMs: 0,
       }, config);
+      notifyEscalation(input, 'Claude is asking you a question', config);
       process.exit(0);
     }
     return;
@@ -214,6 +217,7 @@ export async function main(): Promise<void> {
     if (mode === 'hands-free') {
       writePreToolUseDeny(permCheck.reason);
     } else {
+      notifyEscalation(input, permCheck.reason, config);
       process.exit(0);
     }
     return;

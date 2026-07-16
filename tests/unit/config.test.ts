@@ -166,3 +166,30 @@ describe('notify config', () => {
     expect(config.notify).toBeUndefined();
   });
 });
+
+describe('escalationNotifyCommand', () => {
+  it('carries through valid escalationNotifyCommand', () => {
+    const config = mergeConfig({ escalationNotifyCommand: 'terminal-notifier -title "Test"' });
+    expect(config.escalationNotifyCommand).toBe('terminal-notifier -title "Test"');
+  });
+
+  it('omits escalationNotifyCommand when empty string', () => {
+    const config = mergeConfig({ escalationNotifyCommand: '' });
+    expect(config.escalationNotifyCommand).toBeUndefined();
+  });
+
+  it('omits escalationNotifyCommand when not provided', () => {
+    const config = mergeConfig({});
+    expect(config.escalationNotifyCommand).toBeUndefined();
+  });
+
+  it('omits escalationNotifyCommand when not a string', () => {
+    const config = mergeConfig({ escalationNotifyCommand: 123 as any });
+    expect(config.escalationNotifyCommand).toBeUndefined();
+  });
+
+  it('omits escalationNotifyCommand when undefined', () => {
+    const config = mergeConfig({ escalationNotifyCommand: undefined });
+    expect(config.escalationNotifyCommand).toBeUndefined();
+  });
+});

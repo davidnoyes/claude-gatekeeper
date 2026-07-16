@@ -119,6 +119,13 @@ export function mergeConfig(userConfig: Partial<ApproverConfig>): ApproverConfig
     }
   }
 
+  // Validate escalationNotifyCommand — only carry through if non-empty string
+  if (merged.escalationNotifyCommand && typeof merged.escalationNotifyCommand === 'string' && merged.escalationNotifyCommand.length > 0) {
+    merged.escalationNotifyCommand = merged.escalationNotifyCommand;
+  } else {
+    merged.escalationNotifyCommand = undefined;
+  }
+
   return merged;
 }
 
