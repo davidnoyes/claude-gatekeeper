@@ -1,5 +1,11 @@
 # ntfy.sh Remote Approval — Design Spec
 
+> **Status (historical):** Original design from 2026-04-01. The feature is **implemented and
+> shipped**, and has **since been hardened**: a one-time **nonce** binds each response to its
+> request (anti-replay), and an optional bearer **token** authenticates publish + SSE for private
+> ntfy servers. See the README "Push Notifications" section and `docs/configuration.md` (`notify`
+> field) for current behavior. Kept as a point-in-time record; not maintained.
+
 ## Overview
 
 Add optional push notification support to Claude Gatekeeper so users can approve/deny escalated permission requests from their phone via ntfy.sh. Only active in allow-or-ask mode. Hands-free mode is unaffected.

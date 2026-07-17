@@ -1,5 +1,14 @@
 # ntfy.sh Remote Approval Implementation Plan
 
+> **Status (historical):** This is the original design/plan from 2026-04-01. The feature is
+> **implemented and shipped** (`src/notify.ts`, `src/notify-setup.ts`, `handleEscalation` in
+> `src/index.ts`). It has **since been hardened** beyond what's described here: each request now
+> carries a one-time **nonce** that the response must echo back (anti-replay), and an optional
+> bearer **token** is sent on both publish and the SSE stream for private/authenticated ntfy
+> servers. For current behavior see the README "Push Notifications" section and
+> `docs/configuration.md` (the `notify` config field). This document is kept as a point-in-time
+> record and is not maintained.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add optional push notifications via ntfy.sh so users can approve/deny escalated permission requests from their phone.
