@@ -109,6 +109,13 @@ claude-gatekeeper status    # shows current state (active / paused / not install
 
 When disabled, hooks remain registered but immediately escalate every request to the normal permission prompt. No AI calls are made. Re-enable anytime with `claude-gatekeeper enable`.
 
+## Notifications
+
+The gatekeeper has two independent, optional notification channels — use either, both, or neither. Both apply only in **allow-or-ask** mode (in hands-free there's no one to notify):
+
+- **Push (remote approval)** — a phone push via ntfy with **Approve / Deny** buttons, so you can act on an escalation while away.
+- **Desktop (local, informational)** — a local notification (e.g. `terminal-notifier`) fired only when the gatekeeper escalates to you. It informs; it can't approve. See [Desktop Notification on Escalation](#desktop-notification-on-escalation).
+
 ## Push Notifications (Remote Approval)
 
 Approve or deny escalated requests from your phone via [ntfy.sh](https://ntfy.sh) push notifications. Only active in allow-or-ask mode.
@@ -130,6 +137,31 @@ The interactive wizard guides you through:
 When the gatekeeper escalates a request, your phone receives a push notification with **Approve** and **Deny** buttons. The terminal prompt also appears simultaneously — whichever you respond to first wins.
 
 Each request carries a one-time **nonce** that the response must echo back, so a stale or replayed tap can't approve a later, unrelated request. If you set a `token` (in `config.json` under `notify.token`, or via the wizard), it's sent as a bearer `Authorization` header on both the publish and the response-listening (SSE) connections, so a private ntfy server can gate access.
+
+### Configuration
+
+`claude-gatekeeper notify setup` writes a `notify` block into
+`~/.claude/claude-gatekeeper/config.json`; you can also edit it by hand:
+
+```json
+{
+  "notify": {
+    "topic": "gk-1a2b3c4d5e6f7g8h",
+    "server": "https://ntfy.sh",
+    "timeoutMs": 60000,
+    "token": "tk_xxxxxxxx"
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `topic` | *(required)* | ntfy topic to publish to — its presence is what activates push notifications. Anyone who knows a **public** topic can see your requests and send approve/deny, so use a long, unguessable value (the wizard generates one). |
+| `server` | `https://ntfy.sh` | ntfy server URL. Point this at a self-hosted / private ntfy instance to keep requests off the public server. |
+| `timeoutMs` | `60000` | How long the hook waits for a phone response before falling back to the normal terminal prompt. Clamped to 5000–120000. |
+| `token` | *(none)* | Bearer token sent as `Authorization` on both the publish and the SSE response stream. Use with a private/authenticated ntfy server so only you can read and approve. |
+
+> **Security:** on the public `ntfy.sh` server a topic is effectively a shared secret — treat it like a password, and for anything sensitive prefer a private server with a `token`. Escalated requests are only ever *published* (never auto-approved); a response takes effect only if it carries the matching one-time nonce.
 
 ### Commands
 
