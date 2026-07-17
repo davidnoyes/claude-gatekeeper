@@ -188,6 +188,29 @@ describe('main()', () => {
     );
   });
 
+  it('hands-free: only PreToolUse logs — PermissionRequest does not double-log', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ ...validInput, hook_event_name: 'PermissionRequest' }));
+    mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
+    mockEvaluate.mockResolvedValue({ decision: 'escalate', confidence: 'high', reasoning: 'no', model: 'cli:haiku', latencyMs: 5 });
+
+    await main();
+
+    // Both hooks act in hands-free, but only the PreToolUse invocation logs, so a
+    // PermissionRequest invocation must not add a duplicate audit entry.
+    expect(mockLogDecision).not.toHaveBeenCalled();
+    expect(stdoutSpy).toHaveBeenCalled(); // still emits a deny (safety)
+  });
+
+  it('hands-free: PreToolUse logs the decision once', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ ...validInput, hook_event_name: 'PreToolUse' }));
+    mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
+    mockEvaluate.mockResolvedValue({ decision: 'escalate', confidence: 'high', reasoning: 'no', model: 'cli:haiku', latencyMs: 5 });
+
+    await main();
+
+    expect(mockLogDecision).toHaveBeenCalledTimes(1);
+  });
+
   it('escalates when AI confidence is below threshold', async () => {
     mockEvaluate.mockResolvedValue({
       decision: 'approve',

@@ -173,6 +173,15 @@ export async function main(): Promise<void> {
     return;
   }
 
+  // Both hooks fire per tool call. In supervised mode PreToolUse deferred above,
+  // so PermissionRequest is the sole logger. In hands-free BOTH hooks act (an
+  // interactive question must never silently slip through), so log only from the
+  // primary hook (PreToolUse) to avoid duplicate audit entries.
+  const isPrimaryHook = mode === 'hands-free' ? hookType === 'PreToolUse' : true;
+  const recordDecision = (result: EvaluationResult): void => {
+    if (isPrimaryHook) logDecision(input, result, config);
+  };
+
   // Interactive tools (e.g. AskUserQuestion) are NOT access requests — they ask
   // the user to choose an option. The gatekeeper must never answer them for the
   // user. In supervised mode, step aside silently so the human answers. In
@@ -181,23 +190,23 @@ export async function main(): Promise<void> {
   // the hook event hands-free mode acts on; PermissionRequest can't carry a deny.)
   if (isInteractiveTool(input.tool_name)) {
     if (mode === 'hands-free') {
-      logDecision(input, {
+      recordDecision({
         decision: 'deny',
         confidence: 'absolute',
         reasoning: 'Interactive question while user is away — instructed Claude to decide',
         model: 'static',
         latencyMs: 0,
-      }, config);
+      });
       writePreToolUseDenyQuestion(AWAY_QUESTION_GUIDANCE);
     } else {
       // Supervised: do nothing — let the user answer the question directly.
-      logDecision(input, {
+      recordDecision({
         decision: 'escalate',
         confidence: 'absolute',
         reasoning: 'Interactive question — left for the user to answer',
         model: 'static',
         latencyMs: 0,
-      }, config);
+      });
       notifyEscalation(input, 'Claude is asking you a question', config);
       process.exit(0);
     }
@@ -216,13 +225,13 @@ export async function main(): Promise<void> {
   }
 
   if (permCheck.action === 'deny') {
-    logDecision(input, {
+    recordDecision({
       decision: mode === 'hands-free' ? 'deny' : 'escalate',
       confidence: 'absolute',
       reasoning: permCheck.reason,
       model: 'permissions',
       latencyMs: 0,
-    }, config);
+    });
     // Permission deny list is an explicit user choice — never override via remote approval.
     // Hands-free: deny with reason. Supervised: escalate to user (no notify).
     if (mode === 'hands-free') {
@@ -239,25 +248,25 @@ export async function main(): Promise<void> {
 
     if (staticDecision === 'approve') {
       writeApproval(hookType);
-      logDecision(input, {
+      recordDecision({
         decision: 'approve',
         confidence: 'absolute',
         reasoning: 'Matched always-approve pattern',
         model: 'static',
         latencyMs: 0,
-      }, config);
+      });
       return;
     }
 
     if (staticDecision === 'escalate' || staticDecision === 'deny') {
       const reasoning = 'Matched always-escalate pattern';
-      logDecision(input, {
+      recordDecision({
         decision: staticDecision,
         confidence: 'absolute',
         reasoning,
         model: 'static',
         latencyMs: 0,
-      }, config);
+      });
       await handleEscalation(input, hookType, reasoning, mode, config);
       return;
     }
@@ -269,7 +278,7 @@ export async function main(): Promise<void> {
     const { systemPrompt, userMessage } = buildPrompt(input, context, mode, projectDir);
     const result = await evaluate(systemPrompt, userMessage, config);
 
-    logDecision(input, result, config);
+    recordDecision(result);
 
     if (result.decision === 'approve' && meetsThreshold(result.confidence, config.confidenceThreshold)) {
       writeApproval(hookType);
