@@ -10,7 +10,7 @@ import { randomBytes } from 'crypto';
 import { readFileSync, existsSync, watch, statSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { getStatusData } from './status';
-import { readDecisions, decisionJsonlPath, DecisionRecord } from './logger';
+import { readDecisions, decisionJsonlPath, DecisionRecord, aggregateCosts } from './logger';
 import { loadConfig } from './config';
 import { setEnabled } from './enable';
 import { setMode } from './mode';
@@ -191,6 +191,13 @@ export function createDashboardServer(opts: { port: number }): DashboardServer {
       const decisions = readDecisions(jsonlPath, limit);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(decisions));
+      return;
+    }
+
+    // GET /api/costs
+    if (method === 'GET' && url === '/api/costs') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(aggregateCosts(jsonlPath)));
       return;
     }
 

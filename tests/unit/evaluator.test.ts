@@ -157,6 +157,27 @@ describe('evaluateWithCli', () => {
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('captures total_cost_usd from the CLI JSON envelope', async () => {
+    const jsonOut = JSON.stringify({
+      result: '{"decision": "approve", "confidence": "high", "reasoning": "Safe"}',
+      total_cost_usd: 0.0038,
+    });
+    mockSpawn.mockReturnValue(createMockProcess({ stdout: jsonOut }));
+
+    const result = await evaluateWithCli('system', 'user', baseConfig);
+    expect(result.costUsd).toBe(0.0038);
+  });
+
+  it('leaves costUsd undefined when total_cost_usd is absent', async () => {
+    const jsonOut = JSON.stringify({
+      result: '{"decision": "approve", "confidence": "high", "reasoning": "Safe"}',
+    });
+    mockSpawn.mockReturnValue(createMockProcess({ stdout: jsonOut }));
+
+    const result = await evaluateWithCli('system', 'user', baseConfig);
+    expect(result.costUsd).toBeUndefined();
+  });
+
   it('falls back to raw stdout parsing when JSON outer parse fails', async () => {
     // stdout is not valid JSON wrapper, but contains AI response directly
     const rawResponse = '{"decision": "approve", "confidence": "absolute", "reasoning": "Looks safe"}';
@@ -165,6 +186,7 @@ describe('evaluateWithCli', () => {
     const result = await evaluateWithCli('system', 'user', baseConfig);
     expect(result.decision).toBe('approve');
     expect(result.confidence).toBe('absolute');
+    expect(result.costUsd).toBeUndefined();
   });
 
   it('returns escalate when CLI exits with non-zero code', async () => {
@@ -174,6 +196,7 @@ describe('evaluateWithCli', () => {
     expect(result.decision).toBe('escalate');
     expect(result.confidence).toBe('none');
     expect(result.reasoning).toContain('auth error');
+    expect(result.costUsd).toBeUndefined();
   });
 
   it('returns escalate on spawn error (command not found)', async () => {
@@ -182,6 +205,7 @@ describe('evaluateWithCli', () => {
     const result = await evaluateWithCli('system', 'user', baseConfig);
     expect(result.decision).toBe('escalate');
     expect(result.reasoning).toContain('command not found');
+    expect(result.costUsd).toBeUndefined();
   });
 
   it('returns escalate on timeout and kills the process', async () => {

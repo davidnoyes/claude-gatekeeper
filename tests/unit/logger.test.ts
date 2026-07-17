@@ -1,5 +1,7 @@
-import { logDecision, logWarning, logError, logDebug, decisionJsonlPath, readDecisions } from '../../src/logger';
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
+import { logDecision, logWarning, logError, logDebug, decisionJsonlPath, readDecisions, aggregateCosts } from '../../src/logger';
+import { appendFileSync, mkdirSync, readFileSync, existsSync, writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { ApproverConfig, EvaluationResult, HookInput } from '../../src/types';
 
 jest.mock('fs');
@@ -66,6 +68,22 @@ describe('logDecision', () => {
     expect(parsed.confidence).toBe('high');
     expect(parsed.tool).toBe('Bash');
     expect(parsed.input).toBe('npm test');
+  });
+
+  it('writes costUsd into the JSONL record when present', () => {
+    logDecision(baseInput, { ...baseResult, costUsd: 0.0038 }, baseConfig);
+
+    const jsonlLine = mockAppendFileSync.mock.calls[1][1] as string;
+    const parsed = JSON.parse(jsonlLine.trim());
+    expect(parsed.costUsd).toBe(0.0038);
+  });
+
+  it('omits costUsd from the JSONL record when absent', () => {
+    logDecision(baseInput, baseResult, baseConfig);
+
+    const jsonlLine = mockAppendFileSync.mock.calls[1][1] as string;
+    const parsed = JSON.parse(jsonlLine.trim());
+    expect('costUsd' in parsed).toBe(false);
   });
 
   it('does not log when logLevel is warn', () => {
@@ -196,5 +214,60 @@ describe('readDecisions', () => {
     expect(records).toHaveLength(3);
     expect(records[0]).toMatchObject({ seq: 7, n: 7 });
     expect(records[2]).toMatchObject({ seq: 9, n: 9 });
+  });
+});
+
+describe('aggregateCosts', () => {
+  // aggregateCosts reads real files via `fs`, which is mocked at the module
+  // level in this file. Delegate the mocked functions to the real
+  // implementation so we can exercise this suite against an actual temp
+  // JSONL file (per the task brief) without touching the other suites above.
+  const actualFs = jest.requireActual('fs');
+  let costJsonlPath: string;
+
+  beforeEach(() => {
+    costJsonlPath = join(tmpdir(), `gatekeeper-cost-test-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+    mockExistsSync.mockImplementation((p: unknown) => actualFs.existsSync(p));
+    mockReadFileSync.mockImplementation((p: unknown, enc: unknown) => actualFs.readFileSync(p, enc));
+  });
+
+  afterEach(() => {
+    try {
+      unlinkSync(costJsonlPath);
+    } catch {
+      // ignore if never written
+    }
+  });
+
+  it('returns zeroed buckets when the file is missing', () => {
+    const result = aggregateCosts(join(tmpdir(), 'gatekeeper-cost-test-missing.jsonl'), new Date(2026, 6, 16, 12, 0, 0));
+    expect(result).toEqual({
+      day: { costUsd: 0, count: 0 },
+      week: { costUsd: 0, count: 0 },
+      month: { costUsd: 0, count: 0 },
+    });
+  });
+
+  it('buckets records by local day/week/month with nested inclusion, ignoring records without costUsd', () => {
+    // Fixed "now": Thursday 2026-07-16 (local). Week starts Monday 2026-07-13 00:00 local.
+    const now = new Date(2026, 6, 16, 12, 0, 0);
+
+    const records = [
+      { ts: new Date(2026, 6, 16, 9, 0, 0).toISOString(), costUsd: 0.001 }, // today
+      { ts: new Date(2026, 6, 14, 9, 0, 0).toISOString(), costUsd: 0.002 }, // earlier this week (Tue), not today
+      { ts: new Date(2026, 6, 5, 9, 0, 0).toISOString(), costUsd: 0.004 },  // earlier this month, not this week
+      { ts: new Date(2026, 5, 20, 9, 0, 0).toISOString(), costUsd: 0.008 }, // last month
+      { ts: new Date(2026, 6, 16, 10, 0, 0).toISOString() },                // no costUsd — excluded
+    ];
+
+    actualFs.writeFileSync(costJsonlPath, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const result = aggregateCosts(costJsonlPath, now);
+
+    expect(result.day).toEqual({ costUsd: 0.001, count: 1 });
+    expect(result.week.count).toBe(2);
+    expect(result.week.costUsd).toBeCloseTo(0.003, 10);
+    expect(result.month.count).toBe(3);
+    expect(result.month.costUsd).toBeCloseTo(0.007, 10);
   });
 });

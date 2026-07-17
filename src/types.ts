@@ -49,6 +49,8 @@ export interface EvaluationResult {
   reasoning: string;
   model: string;
   latencyMs: number;
+  /** USD cost of this AI evaluation, when the backend reports it (CLI backend). */
+  costUsd?: number;
 }
 
 /** Configuration for the approver. */

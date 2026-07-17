@@ -104,6 +104,39 @@
     }
     .connection-indicator.live { background: var(--approve); }
 
+    /* Cost tiles */
+    .cost-tiles {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+    }
+
+    .cost-tile {
+      flex: 1 1 8rem;
+      min-width: 8rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.75rem;
+    }
+
+    .cost-tile-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .cost-tile-amount {
+      font-size: clamp(1rem, 2.5vw, 1.25rem);
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .cost-tile-count {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
     /* Controls row */
     .controls {
       background: var(--bg-elevated);
@@ -354,6 +387,7 @@
       .row-header { font-size: 0.75rem; }
       .time { width: 100%; margin-left: 0; margin-top: 0.25rem; }
       .row-footer { flex-direction: column; gap: 0.25rem; }
+      .cost-tiles { flex-direction: column; }
     }
   </style>
 </head>
@@ -372,6 +406,23 @@
           <span class="pill" id="mode-pill">—</span>
           <span class="pill" id="backend-pill">—</span>
           <span class="pill" id="threshold-pill">—</span>
+        </div>
+      </div>
+      <div class="cost-tiles" id="cost-tiles">
+        <div class="cost-tile" id="cost-day">
+          <div class="cost-tile-label">Today</div>
+          <div class="cost-tile-amount"><span id="cost-day-amount">—</span></div>
+          <div class="cost-tile-count"><span id="cost-day-count">—</span></div>
+        </div>
+        <div class="cost-tile" id="cost-week">
+          <div class="cost-tile-label">This week</div>
+          <div class="cost-tile-amount"><span id="cost-week-amount">—</span></div>
+          <div class="cost-tile-count"><span id="cost-week-count">—</span></div>
+        </div>
+        <div class="cost-tile" id="cost-month">
+          <div class="cost-tile-label">This month</div>
+          <div class="cost-tile-amount"><span id="cost-month-amount">—</span></div>
+          <div class="cost-tile-count"><span id="cost-month-count">—</span></div>
         </div>
       </div>
     </div>
@@ -423,6 +474,7 @@
       let currentFilter = { text: '', decision: 'all' };
       let pendingNewCount = 0;
       let isAtTop = true;
+      let costsRefreshTimer = null;
 
       // DOM references
       const els = {
@@ -437,7 +489,13 @@
         feed: document.getElementById('feed'),
         feedContainer: document.getElementById('feed-container'),
         newItemsPill: document.getElementById('new-items-pill'),
-        toast: document.getElementById('toast')
+        toast: document.getElementById('toast'),
+        costDayAmount: document.getElementById('cost-day-amount'),
+        costDayCount: document.getElementById('cost-day-count'),
+        costWeekAmount: document.getElementById('cost-week-amount'),
+        costWeekCount: document.getElementById('cost-week-count'),
+        costMonthAmount: document.getElementById('cost-month-amount'),
+        costMonthCount: document.getElementById('cost-month-count')
       };
 
       // Fetch helpers
@@ -461,6 +519,34 @@
           throw new Error(err.error || res.statusText);
         }
         return res.json();
+      }
+
+      function formatCost(usd) {
+        return usd >= 1 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`;
+      }
+
+      function renderCosts(costs) {
+        const tiers = [
+          { data: costs.day, amountEl: els.costDayAmount, countEl: els.costDayCount },
+          { data: costs.week, amountEl: els.costWeekAmount, countEl: els.costWeekCount },
+          { data: costs.month, amountEl: els.costMonthAmount, countEl: els.costMonthCount }
+        ];
+        tiers.forEach(({ data, amountEl, countEl }) => {
+          amountEl.textContent = formatCost(data.costUsd);
+          countEl.textContent = `${data.count} eval${data.count === 1 ? '' : 's'}`;
+        });
+      }
+
+      function scheduleCostsRefresh() {
+        clearTimeout(costsRefreshTimer);
+        costsRefreshTimer = setTimeout(async () => {
+          try {
+            const costs = await apiGet('/api/costs');
+            renderCosts(costs);
+          } catch (err) {
+            console.error('Failed to refresh costs:', err);
+          }
+        }, 2000);
       }
 
       function showToast(message) {
@@ -520,6 +606,10 @@
           ? `${(d.latencyMs / 1000).toFixed(1)}s`
           : `${d.latencyMs}ms`;
 
+        const costText = typeof d.costUsd === 'number' && Number.isFinite(d.costUsd)
+          ? formatCost(d.costUsd)
+          : '—';
+
         div.innerHTML = `
           <div class="row-header">
             <span class="decision-badge ${d.decision}">${d.decision}</span>
@@ -531,6 +621,7 @@
             <span>Confidence: ${d.confidence || '—'}</span>
             <span>Model: ${d.model || '—'}</span>
             <span>Latency: ${latency}</span>
+            <span>Cost: ${costText}</span>
             ${d.session ? `<span>Session: ${escapeHtml(d.session.slice(0, 8))}</span>` : ''}
           </div>
           ${d.reasoning ? `<div class="reasoning">${escapeHtml(d.reasoning)}</div>` : ''}
@@ -616,6 +707,13 @@
         } catch (err) {
           showToast('Failed to load: ' + err.message);
         }
+
+        try {
+          const costs = await apiGet('/api/costs');
+          renderCosts(costs);
+        } catch (err) {
+          console.error('Failed to load costs:', err);
+        }
       }
 
       // EventSource
@@ -627,6 +725,7 @@
         eventSource.addEventListener('decision', (e) => {
           const d = JSON.parse(e.data);
           addDecision(d, true);
+          scheduleCostsRefresh();
 
           if (!isAtTop) {
             pendingNewCount++;

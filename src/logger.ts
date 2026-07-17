@@ -70,6 +70,7 @@ export function logDecision(
       session: input.session_name ?? input.session_id,
       input: summary,
       reasoning: result.reasoning,
+      costUsd: result.costUsd,
     };
     appendFileSync(jsonlPath, JSON.stringify(jsonlRecord) + '\n');
   } catch {
@@ -128,6 +129,7 @@ export interface DecisionRecord {
   session: string;
   input: string;
   reasoning: string;
+  costUsd?: number;
 }
 
 /**
@@ -160,4 +162,82 @@ export function readDecisions(jsonlPath: string, limit: number): DecisionRecord[
   } catch {
     return [];
   }
+}
+
+/** Aggregated cost/count totals for a time bucket. */
+export interface CostBucket {
+  costUsd: number;
+  count: number;
+}
+
+/**
+ * Aggregate AI evaluation cost totals from the JSONL decision log into
+ * day/week/month buckets (local time), relative to `now`.
+ *
+ * A record counts toward every bucket it falls within (e.g. today's eval
+ * also counts toward this week and this month). Records without a numeric
+ * `costUsd` (static/permission decisions, or older logs predating this
+ * feature) are ignored.
+ */
+export function aggregateCosts(
+  jsonlPath: string,
+  now: Date = new Date()
+): { day: CostBucket; week: CostBucket; month: CostBucket } {
+  const day: CostBucket = { costUsd: 0, count: 0 };
+  const week: CostBucket = { costUsd: 0, count: 0 };
+  const month: CostBucket = { costUsd: 0, count: 0 };
+
+  if (!existsSync(jsonlPath)) {
+    return { day, week, month };
+  }
+
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+  try {
+    const content = readFileSync(jsonlPath, 'utf-8');
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+
+      if (typeof record.costUsd !== 'number') continue;
+
+      const d = new Date(String(record.ts));
+      if (isNaN(d.getTime())) continue;
+
+      const isToday =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+      const isThisWeek = d.getTime() >= weekStart.getTime();
+      const isThisMonth = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+
+      if (isToday) {
+        day.costUsd += record.costUsd;
+        day.count += 1;
+      }
+      if (isThisWeek) {
+        week.costUsd += record.costUsd;
+        week.count += 1;
+      }
+      if (isThisMonth) {
+        month.costUsd += record.costUsd;
+        month.count += 1;
+      }
+    }
+  } catch {
+    return { day: { costUsd: 0, count: 0 }, week: { costUsd: 0, count: 0 }, month: { costUsd: 0, count: 0 } };
+  }
+
+  return { day, week, month };
 }

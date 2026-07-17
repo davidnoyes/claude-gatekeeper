@@ -119,7 +119,8 @@ export async function evaluateWithCli(
         const jsonOut = JSON.parse(stdout);
         const responseText = String(jsonOut.result ?? jsonOut.text ?? stdout);
         const parsed = parseAiResponse(responseText);
-        resolve({ ...parsed, model: `cli:${config.model}`, latencyMs });
+        const costUsd = typeof jsonOut.total_cost_usd === 'number' ? jsonOut.total_cost_usd : undefined;
+        resolve({ ...parsed, model: `cli:${config.model}`, latencyMs, costUsd });
       } catch {
         const parsed = parseAiResponse(stdout);
         resolve({ ...parsed, model: `cli:${config.model}`, latencyMs });
@@ -176,6 +177,8 @@ export async function evaluateWithApi(
       .join('');
 
     const parsed = parseAiResponse(text);
+    // costUsd intentionally left undefined here — could later be derived from
+    // response.usage (input/output tokens) x Haiku pricing.
     return { ...parsed, model: `api:${config.model}`, latencyMs: Date.now() - startTime };
   } catch (err) {
     return {

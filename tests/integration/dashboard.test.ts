@@ -81,6 +81,24 @@ describe('Dashboard server', () => {
     expect(parsed[1]).toMatchObject({ seq: 1, decision: 'deny', tool: 'Write' });
   });
 
+  it('responds to GET /api/costs with day/week/month totals', async () => {
+    const now = new Date().toISOString();
+    writeFileSync(
+      jsonlPath,
+      `{"ts":"${now}","decision":"approve","tool":"Bash","costUsd":0.0038}\n` +
+      `{"ts":"${now}","decision":"approve","tool":"Bash","costUsd":0.0012}\n` +
+      `{"ts":"${now}","decision":"escalate","tool":"Bash"}\n` // no costUsd — excluded
+    );
+
+    const response = await httpGet(`http://127.0.0.1:${TEST_PORT}/api/costs`);
+    const parsed = JSON.parse(response.body);
+
+    for (const bucket of [parsed.day, parsed.week, parsed.month]) {
+      expect(bucket.count).toBe(2);
+      expect(bucket.costUsd).toBeCloseTo(0.005, 10);
+    }
+  });
+
   it('streams decisions via SSE', async () => {
     // Seed initial decision
     writeFileSync(jsonlPath, '{"ts":"2025-01-01T00:00:00.000Z","decision":"approve","tool":"Bash"}\n');
