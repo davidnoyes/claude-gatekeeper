@@ -195,7 +195,16 @@ Runs the dashboard as a detached, pidfile-tracked background process (`~/.claude
 Reads hook registration (`~/.claude/settings.json`) and config to report whether `PermissionRequest`/`PreToolUse` hooks are registered, whether the gatekeeper is enabled, current mode/backend/model/threshold, policy file presence, and notification config. Exposes a human-readable form (`getStatusText()`, used by the `status` CLI command and `ai-help`) and a structured form (`getStatusData()`, used by `dashboard.ts`'s `/api/status`).
 
 ### `cli.ts` — CLI Entry Point
-Commander.js CLI (`claude-gatekeeper <command>`) with subcommands: `setup`, `status`, `mode`, `enable`, `disable`, `notify setup|test|disable`, `dashboard` (with nested `dashboard daemon start|stop|status|restart`), `ai`, and `help`. Running with no subcommand — or an unrecognized one, which is redirected to help — invokes the hidden default `hook` command, which calls `index.ts`'s `main()` to read stdin and run as a hook; this is what Claude Code actually invokes.
+Commander.js CLI (`claude-gatekeeper <command>`) with subcommands: `setup`, `status`, `mode`, `enable`, `disable`, `notify setup|test|disable`, `dashboard` (with nested `dashboard daemon start|stop|status|restart`), `uninstall`, `ai`, and `help`. Running with no subcommand — or an unrecognized one, which is redirected to help — invokes the hidden default `hook` command, which calls `index.ts`'s `main()` to read stdin and run as a hook; this is what Claude Code actually invokes.
+
+### Supporting modules & CLI commands
+Thin layers over the core, mostly driven by `cli.ts`:
+- `setup.ts` / `uninstall.ts` — register / unregister the `PermissionRequest` **and** `PreToolUse` hooks in `~/.claude/settings.json` and scaffold or remove the config + global policy.
+- `mode.ts` / `enable.ts` — write `mode` / `enabled` changes to `config.json`.
+- `notify-setup.ts` — interactive wizard that generates a random ntfy topic, guides phone setup, sends test/approval notifications, and persists the `notify` config.
+- `ai-help.ts` — launches an interactive Claude session preloaded with gatekeeper context (the `ai` command).
+- `cli-prompt.ts` — buffered `readline` helpers for the interactive wizards.
+- `fs-utils.ts` — JSON read/write helpers; `writeJson` is atomic (temp file + `rename`) so a hook reading config never sees a partially-written file.
 
 ## Hook Protocol
 
