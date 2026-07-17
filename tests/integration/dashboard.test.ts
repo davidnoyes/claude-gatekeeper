@@ -244,6 +244,86 @@ describe('Dashboard server', () => {
     expect(response.body).toContain('Unknown mode');
   });
 
+  it('responds to GET /api/patterns with defaults, escalate.user, and approve.user', async () => {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    config.alwaysEscalatePatterns = ['my-escalate'];
+    config.alwaysApprovePatterns = ['my-approve'];
+    writeFileSync(configPath, JSON.stringify(config));
+
+    const response = await httpGet(`http://127.0.0.1:${TEST_PORT}/api/patterns`);
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body);
+    expect(Array.isArray(parsed.escalate.defaults)).toBe(true);
+    expect(parsed.escalate.defaults.length).toBeGreaterThan(0);
+    expect(parsed.escalate.user).toEqual(['my-escalate']);
+    expect(parsed.approve.user).toEqual(['my-approve']);
+  });
+
+  it('rejects POST /api/patterns without token', async () => {
+    const before = readFileSync(configPath, 'utf-8');
+
+    const response = await httpPost(
+      `http://127.0.0.1:${TEST_PORT}/api/patterns`,
+      { escalate: ['foo'], approve: ['bar'] },
+      {}
+    );
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain('Forbidden');
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('accepts POST /api/patterns with valid token and a valid body', async () => {
+    const htmlResponse = await httpGet(`http://127.0.0.1:${TEST_PORT}/`);
+    const tokenMatch = htmlResponse.body.match(/"([a-f0-9]{32})"/);
+    const token = tokenMatch![1];
+
+    const response = await httpPost(
+      `http://127.0.0.1:${TEST_PORT}/api/patterns`,
+      { escalate: ['custom-escalate'], approve: ['custom-approve'] },
+      { 'X-Gatekeeper-Token': token }
+    );
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.patterns).toEqual({ escalate: ['custom-escalate'], approve: ['custom-approve'] });
+
+    const updatedConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(updatedConfig.alwaysEscalatePatterns).toEqual(['custom-escalate']);
+    expect(updatedConfig.alwaysApprovePatterns).toEqual(['custom-approve']);
+  });
+
+  it('rejects POST /api/patterns with an invalid body (non-string element) and leaves config unchanged', async () => {
+    const htmlResponse = await httpGet(`http://127.0.0.1:${TEST_PORT}/`);
+    const tokenMatch = htmlResponse.body.match(/"([a-f0-9]{32})"/);
+    const token = tokenMatch![1];
+    const before = readFileSync(configPath, 'utf-8');
+
+    const response = await httpPost(
+      `http://127.0.0.1:${TEST_PORT}/api/patterns`,
+      { escalate: [123], approve: [] },
+      { 'X-Gatekeeper-Token': token }
+    );
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body).error).toBeTruthy();
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('rejects POST /api/patterns with an all-wildcard approve pattern and leaves config unchanged', async () => {
+    const htmlResponse = await httpGet(`http://127.0.0.1:${TEST_PORT}/`);
+    const tokenMatch = htmlResponse.body.match(/"([a-f0-9]{32})"/);
+    const token = tokenMatch![1];
+    const before = readFileSync(configPath, 'utf-8');
+
+    const response = await httpPost(
+      `http://127.0.0.1:${TEST_PORT}/api/patterns`,
+      { escalate: [], approve: ['*'] },
+      { 'X-Gatekeeper-Token': token }
+    );
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body).error).toBeTruthy();
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
   it('rejects non-localhost Host header', async () => {
     const response = await httpGet(`http://127.0.0.1:${TEST_PORT}/api/status`, {
       Host: 'evil.com',

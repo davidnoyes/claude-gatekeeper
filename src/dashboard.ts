@@ -11,9 +11,10 @@ import { readFileSync, existsSync, watch, statSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { getStatusData } from './status';
 import { readDecisions, decisionJsonlPath, DecisionRecord, aggregateCosts } from './logger';
-import { loadConfig } from './config';
+import { loadConfig, DEFAULT_CONFIG } from './config';
 import { setEnabled } from './enable';
 import { setMode } from './mode';
+import { getUserPatterns, setUserPatterns } from './patterns';
 
 /** Resolve templates directory (same pattern as setup.ts). */
 function getTemplatesDir(): string {
@@ -276,6 +277,41 @@ export function createDashboardServer(opts: { port: number }): DashboardServer {
       setEnabled(false);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, status: getStatusData() }));
+      return;
+    }
+
+    // GET /api/patterns
+    if (method === 'GET' && url === '/api/patterns') {
+      const userPatterns = getUserPatterns();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        escalate: { defaults: DEFAULT_CONFIG.alwaysEscalatePatterns, user: userPatterns.escalate },
+        approve: { user: userPatterns.approve },
+      }));
+      return;
+    }
+
+    // POST /api/patterns
+    if (method === 'POST' && url === '/api/patterns') {
+      if (!hasValidToken(req.headers, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: missing or invalid token' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          const result = setUserPatterns(parsed.escalate, parsed.approve);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, patterns: result }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        }
+      });
       return;
     }
 

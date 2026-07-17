@@ -190,6 +190,143 @@
     }
     .mode-selector .btn:last-child { border-right: none; }
 
+    /* Patterns panel */
+    .patterns-panel {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .patterns-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: clamp(0.5rem, 2vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: left;
+    }
+    .patterns-toggle:hover { background: var(--bg-card); }
+
+    .patterns-content {
+      padding: 0 clamp(0.75rem, 2vw, 1rem) clamp(0.75rem, 2vw, 1rem);
+    }
+
+    .patterns-loading {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      padding: 0.5rem 0;
+    }
+
+    .patterns-error {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.875rem;
+      color: var(--deny);
+      padding: 0.5rem 0;
+    }
+
+    .patterns-body {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .patterns-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+    }
+
+    .patterns-section-title {
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .pattern-warning {
+      color: var(--escalate);
+      font-size: 0.8125rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .pattern-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .pattern-empty {
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+    }
+
+    .pattern-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.25rem 0.5rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      font-size: 0.8125rem;
+    }
+
+    .pattern-chip.pattern-chip-muted {
+      color: var(--text-muted);
+      background: transparent;
+    }
+
+    .pattern-chip-text {
+      word-break: break-all;
+    }
+
+    .pattern-chip-remove {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0;
+    }
+    .pattern-chip-remove:hover { color: var(--deny); }
+
+    .pattern-defaults-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin: 0.5rem 0 0.375rem;
+    }
+
+    .pattern-add-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .pattern-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      font-size: 0.875rem;
+    }
+    .pattern-input::placeholder { color: var(--text-muted); }
+
+    .patterns-save-row {
+      display: flex;
+      justify-content: flex-end;
+    }
+
     /* Filter bar */
     .filters {
       padding: clamp(0.5rem, 2vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
@@ -388,6 +525,8 @@
       .time { width: 100%; margin-left: 0; margin-top: 0.25rem; }
       .row-footer { flex-direction: column; gap: 0.25rem; }
       .cost-tiles { flex-direction: column; }
+      .pattern-add-row { flex-direction: column; }
+      .patterns-save-row .btn { width: 100%; }
     }
   </style>
 </head>
@@ -436,6 +575,44 @@
       </div>
     </div>
 
+    <!-- Patterns -->
+    <div class="patterns-panel">
+      <button type="button" class="patterns-toggle" id="patterns-toggle" aria-expanded="false" aria-controls="patterns-content">
+        <span id="patterns-toggle-label">Patterns ▸</span>
+      </button>
+      <div class="patterns-content" id="patterns-content" style="display:none;">
+        <div class="patterns-loading" id="patterns-loading" style="display:none;">Loading patterns…</div>
+        <div class="patterns-error" id="patterns-error" style="display:none;">
+          <span id="patterns-error-text"></span>
+          <button type="button" class="btn" id="patterns-retry-btn">Retry</button>
+        </div>
+        <div class="patterns-body" id="patterns-body" style="display:none;">
+          <div class="patterns-section">
+            <h3 class="patterns-section-title">Always escalate</h3>
+            <div class="pattern-list" id="escalate-user-list"></div>
+            <div class="pattern-add-row">
+              <input type="text" class="pattern-input" id="escalate-input" placeholder="Add pattern…">
+              <button type="button" class="btn" id="escalate-add-btn">Add</button>
+            </div>
+            <div class="pattern-defaults-label">Built-in (always active, can't be removed)</div>
+            <div class="pattern-list" id="escalate-defaults-list"></div>
+          </div>
+          <div class="patterns-section">
+            <h3 class="patterns-section-title">Always approve</h3>
+            <div class="pattern-warning">Approve auto-runs commands with no AI check. For a compound command, every segment must match. Keep patterns narrow.</div>
+            <div class="pattern-list" id="approve-user-list"></div>
+            <div class="pattern-add-row">
+              <input type="text" class="pattern-input" id="approve-input" placeholder="Add pattern…">
+              <button type="button" class="btn" id="approve-add-btn">Add</button>
+            </div>
+          </div>
+          <div class="patterns-save-row">
+            <button type="button" class="btn" id="patterns-save-btn">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Filters -->
     <div class="filters">
       <input type="text" class="filter-input" id="search-input" placeholder="Filter by tool, input, or reasoning…">
@@ -475,6 +652,10 @@
       let pendingNewCount = 0;
       let isAtTop = true;
       let costsRefreshTimer = null;
+      let patternsLoaded = false;
+      let escalateUser = [];
+      let escalateDefaults = [];
+      let approveUser = [];
 
       // DOM references
       const els = {
@@ -495,7 +676,23 @@
         costWeekAmount: document.getElementById('cost-week-amount'),
         costWeekCount: document.getElementById('cost-week-count'),
         costMonthAmount: document.getElementById('cost-month-amount'),
-        costMonthCount: document.getElementById('cost-month-count')
+        costMonthCount: document.getElementById('cost-month-count'),
+        patternsToggle: document.getElementById('patterns-toggle'),
+        patternsToggleLabel: document.getElementById('patterns-toggle-label'),
+        patternsContent: document.getElementById('patterns-content'),
+        patternsLoading: document.getElementById('patterns-loading'),
+        patternsError: document.getElementById('patterns-error'),
+        patternsErrorText: document.getElementById('patterns-error-text'),
+        patternsRetryBtn: document.getElementById('patterns-retry-btn'),
+        patternsBody: document.getElementById('patterns-body'),
+        escalateUserList: document.getElementById('escalate-user-list'),
+        escalateDefaultsList: document.getElementById('escalate-defaults-list'),
+        escalateInput: document.getElementById('escalate-input'),
+        escalateAddBtn: document.getElementById('escalate-add-btn'),
+        approveUserList: document.getElementById('approve-user-list'),
+        approveInput: document.getElementById('approve-input'),
+        approveAddBtn: document.getElementById('approve-add-btn'),
+        patternsSaveBtn: document.getElementById('patterns-save-btn')
       };
 
       // Fetch helpers
@@ -553,6 +750,63 @@
         els.toast.textContent = message;
         els.toast.classList.add('show');
         setTimeout(() => els.toast.classList.remove('show'), 4000);
+      }
+
+      // Patterns panel
+      function renderPatternChips(container, items, removable) {
+        if (!items.length) {
+          container.innerHTML = '<div class="pattern-empty">None</div>';
+          return;
+        }
+        container.innerHTML = items.map((p, i) => `
+          <div class="pattern-chip${removable ? '' : ' pattern-chip-muted'}">
+            <span class="pattern-chip-text mono">${escapeHtml(p)}</span>
+            ${removable ? `<button type="button" class="pattern-chip-remove" data-index="${i}" aria-label="Remove pattern">×</button>` : ''}
+          </div>
+        `).join('');
+      }
+
+      function renderPatterns() {
+        renderPatternChips(els.escalateUserList, escalateUser, true);
+        renderPatternChips(els.escalateDefaultsList, escalateDefaults, false);
+        renderPatternChips(els.approveUserList, approveUser, true);
+      }
+
+      async function loadPatterns() {
+        els.patternsError.style.display = 'none';
+        els.patternsBody.style.display = 'none';
+        els.patternsLoading.style.display = '';
+        try {
+          const data = await apiGet('/api/patterns');
+          escalateUser = data.escalate.user.slice();
+          escalateDefaults = data.escalate.defaults.slice();
+          approveUser = data.approve.user.slice();
+          patternsLoaded = true;
+          renderPatterns();
+          els.patternsLoading.style.display = 'none';
+          els.patternsBody.style.display = '';
+        } catch (err) {
+          els.patternsLoading.style.display = 'none';
+          els.patternsErrorText.textContent = 'Failed to load patterns: ' + err.message;
+          els.patternsError.style.display = '';
+          showToast('Failed to load patterns: ' + err.message);
+        }
+      }
+
+      function addPatternFromInput(inputEl, list, requireConfirm) {
+        const value = inputEl.value.trim();
+        if (!value) return;
+        if (list.includes(value)) {
+          inputEl.value = '';
+          return;
+        }
+        if (requireConfirm) {
+          const ok = confirm(`Add approve pattern "${value}"? Approve auto-runs commands with no AI check. For a compound command, every segment must match. Keep patterns narrow.`);
+          if (!ok) return;
+        }
+        list.push(value);
+        inputEl.value = '';
+        renderPatterns();
       }
 
       // Status update
@@ -788,6 +1042,71 @@
             document.querySelectorAll('.mode-selector .btn').forEach(b => b.disabled = false);
           }
         });
+      });
+
+      // Patterns panel
+      els.patternsToggle.addEventListener('click', () => {
+        const expanded = els.patternsToggle.getAttribute('aria-expanded') === 'true';
+        const next = !expanded;
+        els.patternsToggle.setAttribute('aria-expanded', String(next));
+        els.patternsContent.style.display = next ? '' : 'none';
+        els.patternsToggleLabel.textContent = next ? 'Patterns ▾' : 'Patterns ▸';
+        if (next && !patternsLoaded) {
+          loadPatterns();
+        }
+      });
+
+      els.patternsRetryBtn.addEventListener('click', loadPatterns);
+
+      els.escalateAddBtn.addEventListener('click', () => {
+        addPatternFromInput(els.escalateInput, escalateUser, false);
+      });
+      els.escalateInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addPatternFromInput(els.escalateInput, escalateUser, false);
+        }
+      });
+
+      els.approveAddBtn.addEventListener('click', () => {
+        addPatternFromInput(els.approveInput, approveUser, true);
+      });
+      els.approveInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addPatternFromInput(els.approveInput, approveUser, true);
+        }
+      });
+
+      els.escalateUserList.addEventListener('click', (e) => {
+        const btn = e.target.closest('.pattern-chip-remove');
+        if (!btn) return;
+        const idx = parseInt(btn.dataset.index, 10);
+        escalateUser.splice(idx, 1);
+        renderPatterns();
+      });
+
+      els.approveUserList.addEventListener('click', (e) => {
+        const btn = e.target.closest('.pattern-chip-remove');
+        if (!btn) return;
+        const idx = parseInt(btn.dataset.index, 10);
+        approveUser.splice(idx, 1);
+        renderPatterns();
+      });
+
+      els.patternsSaveBtn.addEventListener('click', async () => {
+        els.patternsSaveBtn.disabled = true;
+        try {
+          const res = await apiPost('/api/patterns', { escalate: escalateUser, approve: approveUser });
+          escalateUser = res.patterns.escalate.slice();
+          approveUser = res.patterns.approve.slice();
+          renderPatterns();
+          showToast('Patterns saved');
+        } catch (err) {
+          showToast('Save failed: ' + err.message);
+        } finally {
+          els.patternsSaveBtn.disabled = false;
+        }
       });
 
       // Filters

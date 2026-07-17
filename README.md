@@ -294,6 +294,8 @@ Your `alwaysEscalatePatterns` and `alwaysApprovePatterns` in `config.json` are *
 
 Now `git push`, `git push origin main --force`, and `deploy.sh && git push` all escalate to you instead of being auto-approved. `alwaysApprovePatterns` works the same way but auto-approves (no AI); for a compound command, **every** segment must match an approve pattern.
 
+You can also add and remove these from the [Dashboard](#dashboard)'s **Patterns** panel (the built-in defaults are shown read-only). Edits are validated and saved to `config.json`, and take effect on the next command.
+
 ## Audit Log
 
 Every decision is logged to the audit file:
