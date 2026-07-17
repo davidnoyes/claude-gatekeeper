@@ -282,6 +282,18 @@ These dangerous patterns bypass AI and always show the prompt to you (in hands-f
 - `docker rm *`, `docker rmi *`, `docker system prune*`
 - And more (fork bombs, disk wiping, etc.)
 
+### Adding your own patterns
+
+Your `alwaysEscalatePatterns` and `alwaysApprovePatterns` in `config.json` are **merged with** the defaults (they add to them — you can't accidentally remove a built-in safety pattern). Patterns use `*` as a wildcard and are matched per-segment for Bash. For example, to always be asked before any push:
+
+```json
+{
+  "alwaysEscalatePatterns": ["git push*"]
+}
+```
+
+Now `git push`, `git push origin main --force`, and `deploy.sh && git push` all escalate to you instead of being auto-approved. `alwaysApprovePatterns` works the same way but auto-approves (no AI); for a compound command, **every** segment must match an approve pattern.
+
 ## Audit Log
 
 Every decision is logged to the audit file:
