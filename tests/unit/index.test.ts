@@ -152,6 +152,42 @@ describe('main()', () => {
 
   // --- Escalation flows ---
 
+  it('does not double-log: PreToolUse defers to PermissionRequest in supervised mode', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      ...validInput,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question: 'Pick one?' }] },
+    }));
+
+    await main();
+
+    // PreToolUse steps aside silently — no log, no output — so the single log
+    // comes from the PermissionRequest invocation only.
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(mockLogDecision).not.toHaveBeenCalled();
+    expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs an interactive escalation exactly once (PermissionRequest)', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      ...validInput,
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question: 'Pick one?' }] },
+    }));
+
+    await main();
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(mockLogDecision).toHaveBeenCalledTimes(1);
+    expect(mockLogDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ tool_name: 'AskUserQuestion' }),
+      expect.objectContaining({ decision: 'escalate' }),
+      defaultConfig,
+    );
+  });
+
   it('escalates when AI confidence is below threshold', async () => {
     mockEvaluate.mockResolvedValue({
       decision: 'approve',

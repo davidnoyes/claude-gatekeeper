@@ -162,6 +162,17 @@ export async function main(): Promise<void> {
 
   const hookType = input.hook_event_name;
 
+  // In allow-or-ask (supervised) mode, PreToolUse defers entirely to
+  // PermissionRequest — the actual permission-decision moment. Both hooks fire
+  // for the same tool call, so acting in both would double-log (and
+  // double-notify) escalations. PreToolUse steps aside silently here and lets
+  // PermissionRequest be the sole actor. (Hands-free has no PermissionRequest to
+  // defer to, so it continues and acts below.)
+  if (hookType === 'PreToolUse' && mode !== 'hands-free') {
+    process.exit(0);
+    return;
+  }
+
   // Interactive tools (e.g. AskUserQuestion) are NOT access requests — they ask
   // the user to choose an option. The gatekeeper must never answer them for the
   // user. In supervised mode, step aside silently so the human answers. In
@@ -220,13 +231,6 @@ export async function main(): Promise<void> {
       notifyEscalation(input, permCheck.reason, config);
       process.exit(0);
     }
-    return;
-  }
-
-  // PreToolUse in supervised mode with no permission match →
-  // pass through (let PermissionRequest handle it)
-  if (hookType === 'PreToolUse' && mode !== 'hands-free') {
-    process.exit(0);
     return;
   }
 
