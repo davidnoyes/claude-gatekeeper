@@ -16,14 +16,26 @@ nvm exec npm run build
 
 This compiles TypeScript to JavaScript in the `dist/` directory.
 
-## Step 2: Register the Hook
+## Step 2: Register the Hooks
 
-Add the PermissionRequest hook to your `~/.claude/settings.json`:
+`claude-gatekeeper setup` (see Step 2a below) registers **two** hooks in your `~/.claude/settings.json`: `PermissionRequest` (the main gate) and `PreToolUse` (needed for actor-hook-model coverage). Both point at the same `bin/gatekeeper` binary. To do it manually instead, add both hook types:
 
 ```json
 {
   "hooks": {
     "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
+            "timeout": 90000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
       {
         "matcher": "",
         "hooks": [
@@ -41,10 +53,10 @@ Add the PermissionRequest hook to your `~/.claude/settings.json`:
 
 **Important:**
 - Use the **absolute path** to the `bin/gatekeeper` script
-- The empty `matcher` (`""`) matches all tools — the hook fires for every permission prompt
+- The empty `matcher` (`""`) matches all tools — each hook fires for every relevant event
 - The `timeout` of 90000ms (90s) gives the AI enough time to evaluate (includes one retry on timeout). If it times out, the normal prompt appears (allow-or-ask) or the request is denied (hands-free).
 
-If you already have a `hooks` section, merge the `PermissionRequest` key into it.
+If you already have a `hooks` section, merge the `PermissionRequest` and `PreToolUse` keys into it.
 
 ### Example: Merging with existing hooks
 
@@ -83,10 +95,32 @@ After:
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
+            "timeout": 90000
+          }
+        ]
+      }
     ]
   }
 }
 ```
+
+### Step 2a: Or let `setup` do it for you
+
+Instead of editing JSON by hand, run the setup wizard:
+
+```bash
+/path/to/claude-gatekeeper/bin/gatekeeper setup
+```
+
+This registers both hooks, optionally writes a default config, and optionally installs a global `GATEKEEPER_POLICY.md`. (If you ran `nvm exec npm link`, you can use `claude-gatekeeper setup` instead.)
 
 ## Step 3: (Optional) Create Gatekeeper Policy
 
@@ -112,7 +146,7 @@ cat > ~/.claude/claude-gatekeeper/config.json << 'EOF'
 EOF
 ```
 
-See [configuration.md](configuration.md) for all options.
+See [configuration.md](configuration.md) for all options — for example `escalationNotifyCommand` to trigger a local desktop notification (e.g. `terminal-notifier`) whenever a request escalates.
 
 ## Step 5: Verify
 
@@ -126,11 +160,26 @@ You should see decision entries with timestamps, confidence scores, and reasonin
 
 ## Uninstalling
 
-1. Remove the `PermissionRequest` hook from `~/.claude/settings.json`
+Run `claude-gatekeeper uninstall` (or `bin/gatekeeper uninstall`), or do it manually:
+
+1. Remove the `PermissionRequest` and `PreToolUse` hooks from `~/.claude/settings.json`
 2. (Optional) Delete the config and log files:
    ```bash
    rm -rf ~/.claude/claude-gatekeeper
    ```
+
+## What Else You Can Do
+
+Once installed, `claude-gatekeeper` (or `bin/gatekeeper`) has a few more commands:
+
+- `status` — show current installation and configuration
+- `mode [name]` — view or switch operating mode (`allow-or-ask` / `hands-free`)
+- `enable` / `disable` — toggle the gatekeeper without removing the hooks
+- `notify setup|test|disable` — push notifications to your phone via [ntfy.sh](https://ntfy.sh) so you can approve/deny escalations remotely
+- `dashboard [--port N] [--no-open]` — open a local web dashboard of decisions and cost; `dashboard daemon start|stop|status|restart` runs it as a background process (a plain session process tracked by a pidfile — **not** a launchd login item — so it doesn't get flagged as persistence on MDM/EDR-managed machines, and it doesn't auto-restart or survive logout)
+- `ai` — interactive AI-assisted help for diagnosing your setup
+
+See the [README](../README.md) for full details on each, and [configuration.md](configuration.md) for config options.
 
 ## Troubleshooting
 
@@ -149,3 +198,6 @@ You should see decision entries with timestamps, confidence scores, and reasonin
 - Raise `confidenceThreshold` to `"absolute"`
 - Add patterns to `alwaysEscalatePatterns` in config
 - Make your `GATEKEEPER_POLICY.md` more restrictive
+
+### Want to see decisions and cost at a glance
+- Run `claude-gatekeeper dashboard` for a local web view of recent decisions, or `dashboard daemon start` to keep it running in the background
