@@ -162,25 +162,30 @@ export async function main(): Promise<void> {
 
   const hookType = input.hook_event_name;
 
-  // In allow-or-ask (supervised) mode, PreToolUse defers entirely to
-  // PermissionRequest — the actual permission-decision moment. Both hooks fire
-  // for the same tool call, so acting in both would double-log (and
-  // double-notify) escalations. PreToolUse steps aside silently here and lets
-  // PermissionRequest be the sole actor. (Hands-free has no PermissionRequest to
-  // defer to, so it continues and acts below.)
-  if (hookType === 'PreToolUse' && mode !== 'hands-free') {
+  // Per-mode "actor" hook: exactly one hook runs the AI evaluation for a given
+  // mode; the other defers. Both hooks fire for the same tool call, so this is
+  // what prevents double-evaluation and double-logging. It's a stateless
+  // f(mode, hookType) — each hook process computes the same actor from config and
+  // they agree without any shared state.
+  //   allow-or-ask      -> PermissionRequest (never denies; non-blocking prompt UX)
+  //   hands-free / full -> PreToolUse         (must deny before the tool runs)
+  const AI_ACTOR = mode === 'allow-or-ask' ? 'PermissionRequest' : 'PreToolUse';
+  const isActor = hookType === AI_ACTOR;
+
+  // The actor is the sole logger, so each decision is recorded exactly once even
+  // though both hooks fire.
+  const recordDecision = (result: EvaluationResult): void => {
+    if (isActor) logDecision(input, result, config);
+  };
+
+  // The allow-or-ask non-actor (PreToolUse) has nothing to do — PermissionRequest
+  // is the actor and handles everything, including interactive questions — so it
+  // defers fully here (before interactive/permission), preserving the
+  // non-blocking-prompt UX.
+  if (!isActor && mode === 'allow-or-ask') {
     process.exit(0);
     return;
   }
-
-  // Both hooks fire per tool call. In supervised mode PreToolUse deferred above,
-  // so PermissionRequest is the sole logger. In hands-free BOTH hooks act (an
-  // interactive question must never silently slip through), so log only from the
-  // primary hook (PreToolUse) to avoid duplicate audit entries.
-  const isPrimaryHook = mode === 'hands-free' ? hookType === 'PreToolUse' : true;
-  const recordDecision = (result: EvaluationResult): void => {
-    if (isPrimaryHook) logDecision(input, result, config);
-  };
 
   // Interactive tools (e.g. AskUserQuestion) are NOT access requests — they ask
   // the user to choose an option. The gatekeeper must never answer them for the
@@ -240,6 +245,15 @@ export async function main(): Promise<void> {
       notifyEscalation(input, permCheck.reason, config);
       process.exit(0);
     }
+    return;
+  }
+
+  // The hands-free/full non-actor (PermissionRequest) has already run the
+  // interactive/permission-list static safety backstops above; it now defers the
+  // (static-rule + AI) evaluation to the actor (PreToolUse), so the AI runs
+  // exactly once per command. This is the hands-free double-evaluation fix.
+  if (!isActor) {
+    process.exit(0);
     return;
   }
 

@@ -188,26 +188,28 @@ describe('main()', () => {
     );
   });
 
-  it('hands-free: only PreToolUse logs — PermissionRequest does not double-log', async () => {
+  it('hands-free: PermissionRequest defers the evaluation to PreToolUse (no double eval/log)', async () => {
     mockReadFileSync.mockReturnValue(JSON.stringify({ ...validInput, hook_event_name: 'PermissionRequest' }));
     mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
     mockEvaluate.mockResolvedValue({ decision: 'escalate', confidence: 'high', reasoning: 'no', model: 'cli:haiku', latencyMs: 5 });
 
     await main();
 
-    // Both hooks act in hands-free, but only the PreToolUse invocation logs, so a
-    // PermissionRequest invocation must not add a duplicate audit entry.
+    // PreToolUse is the actor in hands-free; the PermissionRequest invocation defers
+    // before the evaluation, so the AI is not run twice and nothing is logged twice.
+    expect(mockEvaluate).not.toHaveBeenCalled();
     expect(mockLogDecision).not.toHaveBeenCalled();
-    expect(stdoutSpy).toHaveBeenCalled(); // still emits a deny (safety)
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
-  it('hands-free: PreToolUse logs the decision once', async () => {
+  it('hands-free: PreToolUse (the actor) evaluates and logs the decision once', async () => {
     mockReadFileSync.mockReturnValue(JSON.stringify({ ...validInput, hook_event_name: 'PreToolUse' }));
     mockLoadConfig.mockReturnValue({ ...defaultConfig, mode: 'hands-free' as const });
     mockEvaluate.mockResolvedValue({ decision: 'escalate', confidence: 'high', reasoning: 'no', model: 'cli:haiku', latencyMs: 5 });
 
     await main();
 
+    expect(mockEvaluate).toHaveBeenCalledTimes(1);
     expect(mockLogDecision).toHaveBeenCalledTimes(1);
   });
 
@@ -451,6 +453,8 @@ describe('main()', () => {
   });
 
   it('does not call notifyAndWait in hands-free mode even if notify is configured', async () => {
+    // Drive the actor hook for hands-free (PreToolUse), which performs the deny.
+    mockReadFileSync.mockReturnValue(JSON.stringify({ ...validInput, hook_event_name: 'PreToolUse' }));
     mockNotifyAndWait.mockResolvedValue('approve');
     const configWithNotify = {
       ...defaultConfig,
