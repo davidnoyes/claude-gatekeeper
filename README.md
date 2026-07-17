@@ -38,7 +38,7 @@ claude-gatekeeper setup
 ```
 
 This will:
-1. Register the PermissionRequest hook in `~/.claude/settings.json`
+1. Register the PermissionRequest and PreToolUse hooks in `~/.claude/settings.json`
 2. Optionally create a config file at `~/.claude/claude-gatekeeper/config.json`
 3. Optionally install a global `GATEKEEPER_POLICY.md` template
 
@@ -121,12 +121,15 @@ claude-gatekeeper notify setup
 
 The interactive wizard guides you through:
 1. Installing the ntfy app on your phone
-2. Subscribing to a secure generated topic
-3. Verifying notifications work end-to-end
+2. Subscribing to a randomly generated, hard-to-guess topic
+3. (Optional) providing an access token for a private/authenticated ntfy server
+4. Verifying notifications work end-to-end
 
 ### How it works
 
 When the gatekeeper escalates a request, your phone receives a push notification with **Approve** and **Deny** buttons. The terminal prompt also appears simultaneously — whichever you respond to first wins.
+
+Each request carries a one-time **nonce** that the response must echo back, so a stale or replayed tap can't approve a later, unrelated request. If you set a `token` (in `config.json` under `notify.token`, or via the wizard), it's sent as a bearer `Authorization` header on both the publish and the response-listening (SSE) connections, so a private ntfy server can gate access.
 
 ### Commands
 
@@ -135,6 +138,53 @@ claude-gatekeeper notify setup    # interactive setup wizard
 claude-gatekeeper notify test     # send a test notification
 claude-gatekeeper notify disable  # remove notification config
 ```
+
+## Desktop Notification on Escalation
+
+If you're at your machine (rather than remote), you can get a **local desktop notification only when the gatekeeper escalates to you** — never for the many commands it auto-approves. Set `escalationNotifyCommand` in your config to any shell command; it runs (best-effort, detached) on each escalation in allow-or-ask mode:
+
+```json
+// ~/.claude/claude-gatekeeper/config.json
+{
+  "escalationNotifyCommand": "terminal-notifier -title \"Gatekeeper — approval needed\" -subtitle \"$GATEKEEPER_TOOL\" -message \"$GATEKEEPER_INPUT\" -sound Glass"
+}
+```
+
+The command receives details via environment variables (never interpolated into the shell, so there's no injection risk):
+
+| Variable | Contents |
+|----------|----------|
+| `GATEKEEPER_TOOL` | Tool name (e.g. `Bash`, `Write`) |
+| `GATEKEEPER_INPUT` | Short summary of the command / file / URL |
+| `GATEKEEPER_REASON` | Why it was escalated |
+| `GATEKEEPER_CWD` | Working directory |
+
+This is more precise than a generic Claude Code `Notification` hook, which fires when the prompt *appears* — before the gatekeeper has decided — and so alerts even for requests that are then auto-approved.
+
+## Dashboard
+
+A local, real-time web view of gatekeeper decisions, with quick controls.
+
+```bash
+claude-gatekeeper dashboard              # start it and open your browser
+claude-gatekeeper dashboard --port 4180  # choose the port (default 4180)
+claude-gatekeeper dashboard --no-open    # don't auto-open the browser
+```
+
+- **Live feed** of every decision (approve / escalate / deny) with reasoning, confidence, model, and latency, streamed over Server-Sent Events — no polling.
+- **Status + controls** to enable/disable the gatekeeper and switch modes.
+- **Localhost only** (binds `127.0.0.1`); mutating controls are protected by a per-run token plus a Host-header check (anti CSRF / DNS-rebinding).
+
+### Running it in the background
+
+```bash
+claude-gatekeeper dashboard daemon start [--port N]  # run detached in the background
+claude-gatekeeper dashboard daemon status            # running? pid / port / URL
+claude-gatekeeper dashboard daemon stop              # stop it
+claude-gatekeeper dashboard daemon restart [--port N]
+```
+
+This is a plain background process tracked by a pidfile — **not** a launchd LaunchAgent or login item, and it does not auto-restart. It stops on logout or via `daemon stop`. This is deliberate: on MDM/EDR-managed machines, launchd persistence (a login item with an auto-relaunching listener) is often flagged as malware. For auto-start at login on an unmanaged machine, add `claude-gatekeeper dashboard daemon start` to your shell profile.
 
 ## AI Backend
 
@@ -183,11 +233,13 @@ Create `~/.claude/claude-gatekeeper/config.json` (all fields optional):
 | `logFile` | `~/.config/.../decisions.log` | Audit log file path |
 | `logLevel` | `"info"` | `"debug"`, `"info"`, or `"warn"` |
 | `alwaysEscalatePatterns` | (see below) | Wildcard patterns that always escalate |
-| `alwaysApprovePatterns` | `[]` | Wildcard patterns that always approve (no AI) |
+| `alwaysApprovePatterns` | `[]` | Wildcard patterns that always approve (no AI). For compound commands (`a && b`), **every** segment must match |
+| `notify` | (unset) | ntfy push config: `{ topic, server?, token?, timeoutMs? }` — see [Push Notifications](#push-notifications-remote-approval) |
+| `escalationNotifyCommand` | (unset) | Shell command run on each escalation (allow-or-ask) — see [Desktop Notification on Escalation](#desktop-notification-on-escalation) |
 
 ### Default Always-Escalate Patterns
 
-These dangerous patterns bypass AI and always show the prompt to you:
+These dangerous patterns bypass AI and always show the prompt to you (in hands-free mode they're denied). Compound commands are split on `|`, `&&`, `;`, `&`, and newlines, and **each segment** is checked — so a dangerous command can't hide behind a safe prefix. Commands using command substitution (`$(...)`, backticks) skip the static-approve/allow fast paths and always go to AI:
 
 - `rm -rf /*`, `rm -rf /`, `rm -rf ~`
 - `sudo *`, `su *`
@@ -224,33 +276,34 @@ nvm exec npm run test:coverage # With coverage report
 
 ```
 src/
-├── index.ts      # Entry point: stdin → orchestrate → stdout
-├── types.ts      # TypeScript interfaces
-├── config.ts     # Configuration loading + defaults
-├── context.ts    # Load settings, CLAUDE.md, GATEKEEPER_POLICY.md
-├── evaluator.ts  # AI evaluation (dual backend)
-├── prompt.ts     # System prompt + user message construction
-├── logger.ts     # Audit logging
-└── rules.ts      # Static wildcard pattern matching
+├── index.ts          # Entry point: stdin → orchestrate → stdout
+├── cli.ts            # CLI commands (setup, status, dashboard, notify, …)
+├── types.ts          # TypeScript interfaces
+├── config.ts         # Configuration loading + defaults (atomic writes)
+├── context.ts        # Load settings, CLAUDE.md, GATEKEEPER_POLICY.md
+├── permissions.ts    # Match against Claude Code allow/deny/ask lists
+├── rules.ts          # Static wildcard pattern matching (compound-aware)
+├── evaluator.ts      # AI evaluation (dual backend; tools disabled)
+├── prompt.ts         # System prompt + untrusted-context user message
+├── logger.ts         # Audit log (text + JSONL feed for the dashboard)
+├── notify.ts         # ntfy push notifications (token + nonce)
+├── desktop-notify.ts # Escalation-only local desktop notification
+├── dashboard.ts      # Local web dashboard (HTTP + SSE)
+└── daemon.ts         # Run the dashboard as a background process
 ```
 
 ## How AI Evaluation Works
 
-When a request passes static rules without a match, it goes to Claude Haiku for evaluation. The AI receives:
+When a request passes static rules without a match, it goes to Claude Haiku for evaluation. The evaluator deliberately separates **trusted instructions** from **untrusted data**:
 
-1. **A system prompt** defining its role as a security evaluator, with explicit criteria for when to approve vs escalate
-2. **A user message** containing:
-   - The tool name and full input (e.g. `Bash` + `{"command": "npm test"}`)
-   - The working directory
-   - Your existing permission rules (allow/ask/deny lists from Claude settings — gives the AI context about your trust boundaries)
-   - Your project's `GATEKEEPER_POLICY.md` (if present)
-   - Excerpts from your `CLAUDE.md` files (project context)
+- The **system prompt** (authoritative) defines its role as a security evaluator with explicit approve-vs-escalate criteria, and includes your **trusted global** gatekeeper policy (`~/.claude/claude-gatekeeper/GATEKEEPER_POLICY.md`).
+- The **user message** carries the request and its context: the tool name and full input (e.g. `Bash` + `{"command": "npm test"}`), the working directory, and your existing permission rules (allow/ask/deny lists). Anything the agent itself could write — the project `GATEKEEPER_POLICY.md`, `CLAUDE.md` excerpts, and project settings — is wrapped in a clearly delimited **UNTRUSTED CONTEXT** block. The evaluator is instructed to treat that block as data only: it may raise suspicion (leading to escalation) but can **never** be a reason to approve. This stops a compromised or misled agent from writing a file that talks the gatekeeper into approving something.
 
 The AI responds with a JSON object: `{"decision": "approve"|"escalate", "confidence": "<level>", "reasoning": "..."}`. If confidence meets the configured threshold (default: `high`), the decision is applied. Otherwise it escalates. In hands-free mode, "escalate" is converted to "deny" with the reasoning passed to Claude so it can adjust its approach.
 
 The prompt is deliberately conservative — "when in doubt, ALWAYS escalate" — since a false escalation just means you see a normal prompt, while a false approval could be dangerous.
 
-**Response parsing** is resilient: it extracts JSON from the response, falls back to keyword matching if JSON is malformed, and defaults to escalation if nothing can be parsed.
+**Response parsing is fail-safe:** only a well-formed JSON object with an explicit `"decision": "approve"` can auto-approve. Malformed or unparseable output defaults to **escalation** — it never approves on a loose keyword match. For the default `claude -p` backend, the evaluator subprocess also runs with tools disabled (`--allowedTools ""`), so untrusted content in a request can't induce it to take actions.
 
 ## Decision Flow
 
