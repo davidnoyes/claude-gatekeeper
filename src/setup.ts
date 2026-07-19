@@ -14,7 +14,10 @@ import { readJson, writeJson } from './fs-utils';
 import { ask, closePrompt } from './cli-prompt';
 import { printModeExplanation } from './mode';
 
-const HOOK_TIMEOUT = 90000;
+// Hook `timeout` is in SECONDS (per Claude Code hooks spec), not milliseconds.
+// Gatekeeper enforces its own ~90s abort internally (config.timeoutMs); this is
+// the outer backstop for a wedged process.
+const HOOK_TIMEOUT = 90;
 
 function getBinPath(): string {
   return resolve(join(__dirname, '..', 'bin', 'gatekeeper'));

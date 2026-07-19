@@ -30,7 +30,7 @@ This compiles TypeScript to JavaScript in the `dist/` directory.
           {
             "type": "command",
             "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
-            "timeout": 90000
+            "timeout": 90
           }
         ]
       }
@@ -42,7 +42,7 @@ This compiles TypeScript to JavaScript in the `dist/` directory.
           {
             "type": "command",
             "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
-            "timeout": 90000
+            "timeout": 90
           }
         ]
       }
@@ -54,7 +54,7 @@ This compiles TypeScript to JavaScript in the `dist/` directory.
 **Important:**
 - Use the **absolute path** to the `bin/gatekeeper` script
 - The empty `matcher` (`""`) matches all tools — each hook fires for every relevant event
-- The `timeout` of 90000ms (90s) gives the AI enough time to evaluate (includes one retry on timeout). If it times out, the normal prompt appears (allow-or-ask) or the request is denied (hands-free).
+- The `timeout` of 90 (seconds — the hook `timeout` field is in seconds) is an outer backstop for a wedged process. Gatekeeper enforces its own ~90s abort internally, so on timeout the normal prompt appears (allow-or-ask) or the request is denied (hands-free).
 
 If you already have a `hooks` section, merge the `PermissionRequest` and `PreToolUse` keys into it.
 
@@ -91,7 +91,7 @@ After:
           {
             "type": "command",
             "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
-            "timeout": 90000
+            "timeout": 90
           }
         ]
       }
@@ -103,7 +103,7 @@ After:
           {
             "type": "command",
             "command": "/absolute/path/to/claude-gatekeeper/bin/gatekeeper",
-            "timeout": 90000
+            "timeout": 90
           }
         ]
       }
